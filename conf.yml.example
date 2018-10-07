@@ -1,0 +1,20 @@
+api:
+  address: 0.0.0.0
+  port : 7546
+cache:
+  type: "memory"
+  options:
+    memory_limit: 10240
+    ttl: 86400
+http:
+  port: 80
+  backends:
+  - name: "example"
+    domain: "www.example.com"
+    ip: "12.34.56.78"
+https:
+  port: 443
+  backends:
+  - name: "secure-example"
+    domain: "www.secure-example.com"
+    ip: "34.56.78.90"
