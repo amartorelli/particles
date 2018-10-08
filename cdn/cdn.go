@@ -260,11 +260,15 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 
 	ct := resp.Header.Get("Content-Type")
 	if ct != "" {
+		logrus.Debugf("[%s] Content-type: %s", fr, ct)
 		if c.cache.IsCachableContentType(ct) {
 			logrus.Debugf("content type can be cached")
+
 			cc := resp.Header.Get("Cache-Control")
 			ccParts := strings.Split(strings.TrimSpace(cc), ",")
 			var ttl int
+			cachable := false
+
 			for _, s := range ccParts {
 				// handle max age
 				if strings.HasPrefix(s, "max-age") {
@@ -275,26 +279,25 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 					} else {
 						ttl = newTTL
 					}
-					break
 				}
 
-				// cache only if we are allowed
-				if s == "" || strings.ToLower(s) == "public" {
+				// handle caching headers: cache only if we are allowed
+				if strings.ToLower(s) == "public" {
 					logrus.Debugf("Cache-Control: %s, it's ok to cache", s)
-					co := cache.NewContentObject(rb, ct, ttl)
-					logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
-
-					// avoid delaying the response to the user because
-					// the object is being stored, hence use a go routine
-					// Prefer serving the user as fast as possible rather than checking if
-					// there was an error storing the object. It will be picked up via metrics/logs.
-					go c.cache.Store(fr, co)
-				} else {
-					logrus.Debugf("Cache-Control: %s, skipping cache", s)
+					cachable = true
 				}
 			}
+
+			if cachable {
+				logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
+				co := cache.NewContentObject(rb, ct, ttl)
+				// avoid delaying the response to the user because
+				// the object is being stored, hence use a go routine
+				// Prefer serving the user as fast as possible rather than checking if
+				// there was an error storing the object. It will be picked up via metrics/logs.
+				go c.cache.Store(fr, co)
+			}
 		}
-		logrus.Debugf("[%s] Content-type: %s", fr, ct)
 	}
 
 	// forward response headers

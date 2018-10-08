@@ -72,7 +72,7 @@ func (a *API) Shutdown(ctx context.Context) error {
 
 // Response is used to json encode the API response
 type Response struct {
-	Message string
+	Message string `json:"message"`
 }
 
 // PurgeRequest is used to receive a call to purge an item from the cache
@@ -99,7 +99,7 @@ func (a *API) purgeHandler(w http.ResponseWriter, req *http.Request) {
 
 	b, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		logrus.Error("unable to read request body")
+		logrus.Errorf("unable to read request body: %s", err)
 		purgeMetric.WithLabelValues(strconv.Itoa(http.StatusInternalServerError)).Inc()
 		r.Message = "internal error"
 		w.WriteHeader(http.StatusInternalServerError)
@@ -107,10 +107,11 @@ func (a *API) purgeHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	logrus.Debugf("purge_request_body: %s", string(b))
 	pr := PurgeRequest{}
-	err = json.Unmarshal(b, pr)
+	err = json.Unmarshal(b, &pr)
 	if err != nil {
-		logrus.Error("unable to parse purge request")
+		logrus.Errorf("unable to parse purge request: %s", err)
 		purgeMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest)).Inc()
 		r.Message = "unable to parse purge request"
 		w.WriteHeader(http.StatusBadRequest)
@@ -120,7 +121,7 @@ func (a *API) purgeHandler(w http.ResponseWriter, req *http.Request) {
 
 	err = a.cache.Purge(pr.Resource)
 	if err != nil {
-		logrus.Error("unable purge item from cache")
+		logrus.Errorf("unable purge item from cache: %s", err)
 		purgeMetric.WithLabelValues(strconv.Itoa(http.StatusInternalServerError)).Inc()
 		r.Message = "internal error"
 		w.WriteHeader(http.StatusInternalServerError)
