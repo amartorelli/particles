@@ -27,6 +27,11 @@ The configuration is composed of four sections: api, cache, http, https.
 For the api and cache section the configuration is straightforward and specifically to the cache varies depending on which backend is used.
 The http and https endpoints are optional and in case backends aren't defined at all for either of them, that particular server won't be started.
 For HTTPS backends keys and certs are required in order to load the certificates for the domains.
+Note that for each backend you can optionally specify an IP. This will cause the HTTP client to override the DNS
+results and point to that specific IP address.
+The same configuration is valid for the port: backends listening on different ports are supported this way.
+Again, IP and port for backends is absolutely optional and Particles would use by default the same port defined for the HTTP
+or HTTPS Particles endpoints.
 
 ```
 api:

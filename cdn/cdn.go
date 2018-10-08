@@ -85,10 +85,18 @@ func NewCDN(conf Conf) (*CDN, error) {
 	// populate endpoints
 	eps := make(map[string]endpoint, 0)
 	for _, e := range conf.HTTP.Backends {
-		eps[e.Domain] = endpoint{IP: e.IP, Port: conf.HTTP.Port, Proto: "http"}
+		port := conf.HTTP.Port
+		if e.Port > 0 {
+			port = e.Port
+		}
+		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "http"}
 	}
 	for _, e := range conf.HTTPS.Backends {
-		eps[e.Domain] = endpoint{IP: e.IP, Port: conf.HTTPS.Port, Proto: "https"}
+		port := conf.HTTPS.Port
+		if e.Port > 0 {
+			port = e.Port
+		}
+		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "https"}
 	}
 
 	return &CDN{api: a, cache: c, httpServer: s, httpEnabled: len(conf.HTTP.Backends) > 0, httpsServer: ss, httpsEnabled: len(conf.HTTPS.Backends) > 0, httpMux: mux, endpoints: eps}, nil
@@ -106,14 +114,26 @@ func (c *CDN) Start() <-chan struct{} {
 		DualStack: true,
 	}
 	http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// the address always includes the port, so we split and take the host
+		// the address always includes the port, so we split
 		addrParts := strings.Split(addr, ":")
 		host := addrParts[0]
+		port := addrParts[1]
+
+		// check we manage that endpoint
 		e, ok := c.endpoints[host]
 		if !ok {
 			return nil, fmt.Errorf("unhandled endpoint")
 		}
-		addr = fmt.Sprintf("%s:%d", e.IP, e.Port)
+
+		// override IP and/or port if defined
+		if e.IP != "" {
+			host = e.IP
+		}
+		if e.Port > 0 {
+			port = strconv.Itoa(e.Port)
+		}
+
+		addr = fmt.Sprintf("%s:%s", host, port)
 		return dialer.DialContext(ctx, network, addr)
 	}
 

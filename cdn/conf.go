@@ -26,6 +26,7 @@ type BackendConf struct {
 	Name     string `yaml:"name"`
 	Domain   string `yaml:"domain"`
 	IP       string `yaml:"ip"`
+	Port     int    `yaml:"port"`
 	CertFile string `yaml:"cert"`
 	KeyFile  string `yaml:"key"`
 }
