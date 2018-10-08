@@ -210,7 +210,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	// Do a lookup and if present return directly without making a HTTP request
 	content, found, err := c.cache.Lookup(fr)
 	if err != nil {
-		logrus.Errorf("error while looking up %s: %s", fr, err)
+		logrus.Debugf("error while looking up %s: %s", fr, err)
 	}
 	if found {
 		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
@@ -228,7 +228,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	client := &http.Client{}
 	r, err := http.NewRequest(req.Method, fr, req.Body)
 	if err != nil {
-		logrus.Errorf("error creating a new request: %s", err)
+		logrus.Errorf("error creating a new proxy request: %s", err)
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -243,7 +243,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	// execute the request to the backend
 	resp, err := client.Do(r)
 	if err != nil {
-		logrus.Errorf("error executing request: %s", err)
+		logrus.Errorf("error proxying request: %s", err)
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
 		w.WriteHeader(http.StatusBadRequest)
 		return

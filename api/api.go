@@ -121,7 +121,7 @@ func (a *API) purgeHandler(w http.ResponseWriter, req *http.Request) {
 
 	err = a.cache.Purge(pr.Resource)
 	if err != nil {
-		logrus.Errorf("unable purge item from cache: %s", err)
+		logrus.Errorf("unable to purge item from cache: %s", err)
 		purgeMetric.WithLabelValues(strconv.Itoa(http.StatusInternalServerError)).Inc()
 		r.Message = "internal error"
 		w.WriteHeader(http.StatusInternalServerError)

@@ -17,7 +17,7 @@ var (
 
 // MemoryCache represents a cache object
 type MemoryCache struct {
-	objs              map[string]*ContentObject
+	objs              map[string]*MemoryItem
 	contentTypeRegexp *regexp.Regexp
 	defaultTTL        int
 	objsMutex         sync.RWMutex
@@ -32,6 +32,16 @@ type MemoryCacheConfig struct {
 	MemoryLimit int      `yaml:"memory_limit"` // mandatory, how much memory in bytes to use
 	TTL         int      `yaml:"ttl"`          // optional, how long each entry is cached for
 	Patterns    []string `yaml:"patterns"`     // optional, content-type patterns
+}
+
+// MemoryItem is the structure used for the in-memory cache
+type MemoryItem struct {
+	co          *ContentObject
+	timestamp   time.Time
+	ttl         int
+	expiration  time.Time
+	contentSize int
+	hits        int
 }
 
 // NewMemoryCache initialises a new cache
@@ -58,7 +68,7 @@ func NewMemoryCache(options map[string]string) (*MemoryCache, error) {
 		return nil, err
 	}
 
-	return &MemoryCache{objs: make(map[string]*ContentObject), contentTypeRegexp: regex, objsMutex: sync.RWMutex{}, memLimit: ml}, nil
+	return &MemoryCache{objs: make(map[string]*MemoryItem), contentTypeRegexp: regex, objsMutex: sync.RWMutex{}, memLimit: ml}, nil
 }
 
 // IsCachableContentType returns true in case the content type is one that can be cached
@@ -69,25 +79,30 @@ func (c *MemoryCache) IsCachableContentType(contentType string) bool {
 // Lookup returns the content if present and a boolean to represent if it's been found
 func (c *MemoryCache) Lookup(key string) (*ContentObject, bool, error) {
 	c.objsMutex.RLock()
-	co, found := c.objs[key]
+	mi, found := c.objs[key]
 	if found {
 		// if the entry has expired, don't return it and delete it
-		if time.Now().After(co.Expiration()) {
+		if time.Now().After(mi.Expiration()) {
 			lookupMetric.WithLabelValues("miss").Inc()
 			c.misses++
 			delete(c.objs, key)
 			c.objsMutex.RUnlock()
+			logrus.Debugf("item %s is expired", key)
 			return nil, false, fmt.Errorf("expired entry")
 		}
 		lookupMetric.WithLabelValues("hit").Inc()
-		co.hits++
+		mi.hits++
 		c.hits++
-	} else {
-		lookupMetric.WithLabelValues("miss").Inc()
-		c.misses++
+		c.objsMutex.RUnlock()
+		logrus.Debugf("successfully looked up %s", key)
+		return mi.co, found, nil
 	}
+	lookupMetric.WithLabelValues("miss").Inc()
+	c.misses++
 	c.objsMutex.RUnlock()
-	return co, found, nil
+
+	logrus.Debugf("item %s not found", key)
+	return nil, found, nil
 }
 
 // freeMemory frees up some space in the hash map to at least fit a new object of size bytes
@@ -114,6 +129,8 @@ func (c *MemoryCache) freeMemory(size int) error {
 	if fs < size {
 		return fmt.Errorf("unable to free enough memory (%d/%d)", fs, size)
 	}
+
+	logrus.Debugf("successfully freed memory %d", fs)
 	return nil
 }
 
@@ -129,21 +146,31 @@ func (c *MemoryCache) purgeEntries(keys []string) {
 
 // Store inserts a new entry into the cache
 func (c *MemoryCache) Store(key string, co *ContentObject) error {
-	newSize := c.memSize + co.Size()
+	size := len(co.Content())
+	newSize := c.memSize + size
 	if newSize > c.memLimit {
 		storeMetric.WithLabelValues("memory_limit").Inc()
 		logrus.Debugf("memory: %d/%d", newSize, c.memLimit)
-		err := c.freeMemory(co.Size())
+		err := c.freeMemory(size)
 		if err != nil {
-			logrus.Debug(err)
+			logrus.Debug("error storing item %s: %s", key, err)
 			return err
 		}
 	}
 
+	now := time.Now()
+	var ttl int
+	if co.TTL() == 0 {
+		ttl = defaultTTL
+	}
+	mi := &MemoryItem{co: co, timestamp: now, ttl: ttl, expiration: now.Add(time.Duration(ttl) * time.Second), contentSize: size}
+
 	c.objsMutex.Lock()
-	c.objs[key] = co
+	c.objs[key] = mi
 	c.memSize = newSize
 	c.objsMutex.Unlock()
+
+	logrus.Debugf("successfully stored item for %s", key)
 	storeMetric.WithLabelValues("success").Inc()
 	return nil
 }
@@ -160,6 +187,17 @@ func (c *MemoryCache) Purge(key string) error {
 	c.memSize = c.memSize - co.Size()
 	delete(c.objs, key)
 	c.objsMutex.Unlock()
+	logrus.Debugf("successfully purged item %s", key)
 	purgeMetric.WithLabelValues("success").Inc()
 	return nil
+}
+
+// Expiration returns the expiration time for an entry
+func (co *MemoryItem) Expiration() time.Time {
+	return co.expiration
+}
+
+// Size returns the size of the data
+func (co *MemoryItem) Size() int {
+	return co.contentSize
 }

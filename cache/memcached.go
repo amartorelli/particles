@@ -2,11 +2,13 @@ package cache
 
 import (
 	"bytes"
+	"encoding/gob"
 	"fmt"
 	"regexp"
 
-	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/sirupsen/logrus"
+
+	"github.com/bradfitz/gomemcache/memcache"
 )
 
 // MemcachedCache represents a cache object
@@ -15,6 +17,13 @@ type MemcachedCache struct {
 	contentTypeRegexp *regexp.Regexp
 	mc                *memcache.Client
 	defaultTTL        int
+}
+
+// MemcachedItem is the structure used to serialize data into memcache
+type MemcachedItem struct {
+	Content     []byte
+	Headers     map[string]string
+	ContentType string
 }
 
 // NewMemcachedCache initialises a new cache
@@ -54,40 +63,51 @@ func (c *MemcachedCache) IsCachableContentType(contentType string) bool {
 func (c *MemcachedCache) Lookup(key string) (*ContentObject, bool, error) {
 	i, err := c.mc.Get(key)
 	if err == memcache.ErrCacheMiss {
+		logrus.Debugf("cache miss for %s: %s", key, err)
 		lookupMetric.WithLabelValues("miss").Inc()
 		return nil, false, nil
 	}
 	if err != nil {
+		logrus.Debugf("error during the lookup of %s: %s", key, err)
 		lookupMetric.WithLabelValues("error").Inc()
 		return nil, false, err
 	}
-	sep := bytes.Index(i.Value, []byte("|"))
-	if sep == -1 {
-		lookupMetric.WithLabelValues("error").Inc()
-		return nil, false, fmt.Errorf("invalid object fetched from memcached")
-	}
 
-	contentType := []byte(i.Value[0:sep])
-	value := []byte(i.Value[sep+1:])
-	// logrus.Errorf("CONTENTTYPE:", contentType)
-	// logrus.Errorf("VALUE:", value)
+	var mi MemcachedItem
+	buf := bytes.NewBuffer(i.Value)
+
+	dec := gob.NewDecoder(buf)
+	err = dec.Decode(&mi)
+	if err != nil {
+		logrus.Debugf("error decoding item for %s: %s", key, err)
+		lookupMetric.WithLabelValues("error").Inc()
+		return nil, false, fmt.Errorf("error decoding item: %s", err)
+	}
 	lookupMetric.WithLabelValues("success").Inc()
-	// TODO: fix me
-	return NewContentObject(value, string(contentType), make(map[string]string, 0), int(i.Expiration)), true, nil
+
+	return NewContentObject([]byte(mi.Content), string(mi.ContentType), mi.Headers, int(i.Expiration)), true, nil
 }
 
 // Store inserts a new entry into the cache
 func (c *MemcachedCache) Store(key string, co *ContentObject) error {
-	v := append([]byte(co.ContentType), []byte("|")...)
-	logrus.Error("STORED:", append(v, co.Content()...))
+	var buf bytes.Buffer
+	mi := &MemcachedItem{Content: co.Content(), Headers: co.Headers(), ContentType: co.ContentType}
+	enc := gob.NewEncoder(&buf)
+	err := enc.Encode(mi)
+	if err != nil {
+		logrus.Debugf("error encoding item to store for %s: %s", key, err)
+		return fmt.Errorf("error storing item %s: %s", key, err)
+	}
+
 	i := memcache.Item{
 		Key:        key,
-		Value:      append(v, co.Content()...),
+		Value:      buf.Bytes(),
 		Expiration: int32(co.TTL()),
 	}
 
-	err := c.mc.Add(&i)
-	if err != memcache.ErrNotStored {
+	err = c.mc.Set(&i)
+	if err != nil {
+		logrus.Debugf("error storing item %s: %s", key, err)
 		storeMetric.WithLabelValues("error").Inc()
 		return err
 	}
