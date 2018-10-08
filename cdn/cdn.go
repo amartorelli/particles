@@ -121,19 +121,18 @@ func (c *CDN) Start() <-chan struct{} {
 
 		// check we manage that endpoint
 		e, ok := c.endpoints[host]
-		if !ok {
-			return nil, fmt.Errorf("unhandled endpoint")
-		}
+		if ok {
+			// override IP and/or port if defined
+			if e.IP != "" {
+				host = e.IP
+			}
+			if e.Port > 0 {
+				port = strconv.Itoa(e.Port)
+			}
 
-		// override IP and/or port if defined
-		if e.IP != "" {
-			host = e.IP
+			addr = fmt.Sprintf("%s:%s", host, port)
+			return dialer.DialContext(ctx, network, addr)
 		}
-		if e.Port > 0 {
-			port = strconv.Itoa(e.Port)
-		}
-
-		addr = fmt.Sprintf("%s:%s", host, port)
 		return dialer.DialContext(ctx, network, addr)
 	}
 
@@ -214,9 +213,11 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		logrus.Errorf("error while looking up %s: %s", fr, err)
 	}
 	if found {
-		logrus.Infof("cache hit: %s (%s)", fr, content.ContentType)
+		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "error").Inc()
-		w.Header().Add("Content-type", content.ContentType)
+		for k, v := range content.Headers() {
+			w.Header().Set(k, string(v))
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write(content.Content())
 		return
@@ -290,7 +291,13 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 
 			if cachable {
 				logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
-				co := cache.NewContentObject(rb, ct, ttl)
+
+				// we also want to store the headers
+				h := make(map[string]string, 0)
+				for k, v := range resp.Header {
+					h[k] = v[0]
+				}
+				co := cache.NewContentObject(rb, ct, h, ttl)
 				// avoid delaying the response to the user because
 				// the object is being stored, hence use a go routine
 				// Prefer serving the user as fast as possible rather than checking if

@@ -37,6 +37,7 @@ type Cache interface {
 // ContentObject represents a cached object
 type ContentObject struct {
 	content     []byte
+	headers     map[string]string
 	ContentType string
 	timestamp   time.Time
 	ttl         int
@@ -76,12 +77,12 @@ func NewCache(conf Conf) (Cache, error) {
 }
 
 // NewContentObject returns a new cache entry
-func NewContentObject(data []byte, contentType string, ttl int) *ContentObject {
+func NewContentObject(data []byte, contentType string, headers map[string]string, ttl int) *ContentObject {
 	now := time.Now()
 	if ttl == 0 {
 		ttl = defaultTTL
 	}
-	return &ContentObject{content: data, ContentType: contentType, timestamp: now, ttl: ttl, expiration: now.Add(time.Duration(ttl) * time.Second), contentSize: len(data)}
+	return &ContentObject{content: data, ContentType: contentType, headers: headers, timestamp: now, ttl: ttl, expiration: now.Add(time.Duration(ttl) * time.Second), contentSize: len(data)}
 }
 
 // Content exposes the content bytes
@@ -97,6 +98,11 @@ func (co *ContentObject) Size() int {
 // TTL returns the size of the data
 func (co *ContentObject) TTL() int {
 	return co.ttl
+}
+
+// Headers returns the headers
+func (co *ContentObject) Headers() map[string]string {
+	return co.headers
 }
 
 // Expiration returns the expiration time for an entry

@@ -1,11 +1,12 @@
 package cache
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/sirupsen/logrus"
 )
 
 // MemcachedCache represents a cache object
@@ -60,22 +61,28 @@ func (c *MemcachedCache) Lookup(key string) (*ContentObject, bool, error) {
 		lookupMetric.WithLabelValues("error").Inc()
 		return nil, false, err
 	}
-	parts := strings.Split(string(i.Value), "|")
-	if len(parts) < 2 {
+	sep := bytes.Index(i.Value, []byte("|"))
+	if sep == -1 {
 		lookupMetric.WithLabelValues("error").Inc()
 		return nil, false, fmt.Errorf("invalid object fetched from memcached")
 	}
-	value := parts[0]
-	contentType := parts[1]
+
+	contentType := []byte(i.Value[0:sep])
+	value := []byte(i.Value[sep+1:])
+	// logrus.Errorf("CONTENTTYPE:", contentType)
+	// logrus.Errorf("VALUE:", value)
 	lookupMetric.WithLabelValues("success").Inc()
-	return NewContentObject([]byte(value), contentType, int(i.Expiration)), true, nil
+	// TODO: fix me
+	return NewContentObject(value, string(contentType), make(map[string]string, 0), int(i.Expiration)), true, nil
 }
 
 // Store inserts a new entry into the cache
 func (c *MemcachedCache) Store(key string, co *ContentObject) error {
+	v := append([]byte(co.ContentType), []byte("|")...)
+	logrus.Error("STORED:", append(v, co.Content()...))
 	i := memcache.Item{
 		Key:        key,
-		Value:      co.Content(),
+		Value:      append(v, co.Content()...),
 		Expiration: int32(co.TTL()),
 	}
 
