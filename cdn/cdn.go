@@ -121,18 +121,19 @@ func (c *CDN) Start() <-chan struct{} {
 
 		// check we manage that endpoint
 		e, ok := c.endpoints[host]
-		if ok {
-			// override IP and/or port if defined
-			if e.IP != "" {
-				host = e.IP
-			}
-			if e.Port > 0 {
-				port = strconv.Itoa(e.Port)
-			}
-
-			addr = fmt.Sprintf("%s:%s", host, port)
-			return dialer.DialContext(ctx, network, addr)
+		if !ok {
+			return nil, fmt.Errorf("unhandled endpoint")
 		}
+
+		// override IP and/or port if defined
+		if e.IP != "" {
+			host = e.IP
+		}
+		if e.Port > 0 {
+			port = strconv.Itoa(e.Port)
+		}
+
+		addr = fmt.Sprintf("%s:%s", host, port)
 		return dialer.DialContext(ctx, network, addr)
 	}
 
