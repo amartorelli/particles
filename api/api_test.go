@@ -11,6 +11,18 @@ import (
 )
 
 func TestPurgeHandler(t *testing.T) {
+	tt := []struct {
+		method string
+		data   []byte
+		code   int
+		err    error
+	}{
+		{"GET", []byte(""), http.StatusMethodNotAllowed, fmt.Errorf("A get request should be not allowed")},
+		{"POST", []byte("bad request"), http.StatusBadRequest, fmt.Errorf("An invalid purge request should return a bad request")},
+		{"POST", notFoundPR, http.StatusInternalServerError, fmt.Errorf("A request trying to purge an item that isn't present should return an internal error")},
+		{"POST", foundPR, http.StatusOK, fmt.Errorf("A request trying to purge an item that is present should return an OK code")},
+	}
+
 	ac := DefaultConf()
 	cc := cache.DefaultConf()
 	c, err := cache.NewCache(cc)
@@ -40,18 +52,6 @@ func TestPurgeHandler(t *testing.T) {
 	foundPR, err := json.Marshal(PurgeRequest{Resource: "www.example.com"})
 	if err != nil {
 		t.Error(err)
-	}
-
-	tt := []struct {
-		method string
-		data   []byte
-		code   int
-		err    error
-	}{
-		{"GET", []byte(""), http.StatusMethodNotAllowed, fmt.Errorf("A get request should be not allowed")},
-		{"POST", []byte("bad request"), http.StatusBadRequest, fmt.Errorf("An invalid purge request should return a bad request")},
-		{"POST", notFoundPR, http.StatusInternalServerError, fmt.Errorf("A request trying to purge an item that isn't present should return an internal error")},
-		{"POST", foundPR, http.StatusOK, fmt.Errorf("A request trying to purge an item that is present should return an OK code")},
 	}
 
 	for _, tc := range tt {

@@ -27,7 +27,7 @@ func DefaultConf() Conf {
 
 // Cache interface
 type Cache interface {
-	IsCachableContentType(key string) bool
+	IsCachableContentType(contentType string) bool
 	Lookup(key string) (*ContentObject, bool, error)
 	Store(key string, co *ContentObject) error
 	Purge(key string) error
