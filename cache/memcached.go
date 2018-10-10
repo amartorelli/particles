@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/sirupsen/logrus"
 
@@ -61,15 +62,18 @@ func (c *MemcachedCache) IsCachableContentType(contentType string) bool {
 // In memcache we store the content type in the value in the form:
 // value ="content-type|bytes" so we split on "|"
 func (c *MemcachedCache) Lookup(key string) (*ContentObject, bool, error) {
+	start := time.Now()
+	defer lookupDuration.WithLabelValues("memcached").Observe(time.Since(start).Seconds())
+
 	i, err := c.mc.Get(key)
 	if err == memcache.ErrCacheMiss {
 		logrus.Debugf("cache miss for %s: %s", key, err)
-		lookupMetric.WithLabelValues("miss").Inc()
+		lookupMetric.WithLabelValues("memcached", "miss").Inc()
 		return nil, false, nil
 	}
 	if err != nil {
 		logrus.Debugf("error during the lookup of %s: %s", key, err)
-		lookupMetric.WithLabelValues("error").Inc()
+		lookupMetric.WithLabelValues("memcached", "error").Inc()
 		return nil, false, err
 	}
 
@@ -80,16 +84,19 @@ func (c *MemcachedCache) Lookup(key string) (*ContentObject, bool, error) {
 	err = dec.Decode(&mi)
 	if err != nil {
 		logrus.Debugf("error decoding item for %s: %s", key, err)
-		lookupMetric.WithLabelValues("error").Inc()
+		lookupMetric.WithLabelValues("memcached", "error").Inc()
 		return nil, false, fmt.Errorf("error decoding item: %s", err)
 	}
-	lookupMetric.WithLabelValues("success").Inc()
+	lookupMetric.WithLabelValues("memcached", "success").Inc()
 
 	return NewContentObject([]byte(mi.Content), string(mi.ContentType), mi.Headers, int(i.Expiration)), true, nil
 }
 
 // Store inserts a new entry into the cache
 func (c *MemcachedCache) Store(key string, co *ContentObject) error {
+	start := time.Now()
+	defer storeDuration.WithLabelValues("memcached").Observe(time.Since(start).Seconds())
+
 	var buf bytes.Buffer
 	mi := &MemcachedItem{Content: co.Content(), Headers: co.Headers(), ContentType: co.ContentType}
 	enc := gob.NewEncoder(&buf)
@@ -108,27 +115,30 @@ func (c *MemcachedCache) Store(key string, co *ContentObject) error {
 	err = c.mc.Set(&i)
 	if err != nil {
 		logrus.Debugf("error storing item %s: %s", key, err)
-		storeMetric.WithLabelValues("error").Inc()
+		storeMetric.WithLabelValues("memcached", "error").Inc()
 		return err
 	}
 
-	storeMetric.WithLabelValues("success").Inc()
+	storeMetric.WithLabelValues("memcached", "success").Inc()
 	return nil
 }
 
 // Purge deletes an item from the cache
 func (c *MemcachedCache) Purge(key string) error {
+	start := time.Now()
+	defer purgeDuration.WithLabelValues("memcached").Observe(time.Since(start).Seconds())
+
 	err := c.mc.Delete(key)
 	if err == memcache.ErrCacheMiss {
-		purgeMetric.WithLabelValues("miss").Inc()
+		purgeMetric.WithLabelValues("memcached", "miss").Inc()
 		return nil
 	}
 
 	if err != nil {
-		purgeMetric.WithLabelValues("error").Inc()
+		purgeMetric.WithLabelValues("memcached", "error").Inc()
 		return err
 	}
 
-	purgeMetric.WithLabelValues("success").Inc()
+	purgeMetric.WithLabelValues("memcached", "success").Inc()
 	return nil
 }

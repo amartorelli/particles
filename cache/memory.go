@@ -78,26 +78,29 @@ func (c *MemoryCache) IsCachableContentType(contentType string) bool {
 
 // Lookup returns the content if present and a boolean to represent if it's been found
 func (c *MemoryCache) Lookup(key string) (*ContentObject, bool, error) {
+	start := time.Now()
+	defer lookupDuration.WithLabelValues("memory").Observe(time.Since(start).Seconds())
+
 	c.objsMutex.RLock()
 	mi, found := c.objs[key]
 	if found {
 		// if the entry has expired, don't return it and delete it
 		if time.Now().After(mi.Expiration()) {
-			lookupMetric.WithLabelValues("miss").Inc()
+			lookupMetric.WithLabelValues("memory", "miss").Inc()
 			c.misses++
 			delete(c.objs, key)
 			c.objsMutex.RUnlock()
 			logrus.Debugf("item %s is expired", key)
 			return nil, false, fmt.Errorf("expired entry")
 		}
-		lookupMetric.WithLabelValues("hit").Inc()
+		lookupMetric.WithLabelValues("memory", "hit").Inc()
 		mi.hits++
 		c.hits++
 		c.objsMutex.RUnlock()
 		logrus.Debugf("successfully looked up %s", key)
 		return mi.co, found, nil
 	}
-	lookupMetric.WithLabelValues("miss").Inc()
+	lookupMetric.WithLabelValues("memory", "miss").Inc()
 	c.misses++
 	c.objsMutex.RUnlock()
 
@@ -146,14 +149,17 @@ func (c *MemoryCache) purgeEntries(keys []string) {
 
 // Store inserts a new entry into the cache
 func (c *MemoryCache) Store(key string, co *ContentObject) error {
+	start := time.Now()
+	defer storeDuration.WithLabelValues("memory").Observe(time.Since(start).Seconds())
+
 	size := len(co.Content())
 	newSize := c.memSize + size
 	if newSize > c.memLimit {
-		storeMetric.WithLabelValues("memory_limit").Inc()
+		storeMetric.WithLabelValues("memory", "memory_limit").Inc()
 		logrus.Debugf("memory: %d/%d", newSize, c.memLimit)
 		err := c.freeMemory(size)
 		if err != nil {
-			logrus.Debug("error storing item %s: %s", key, err)
+			logrus.Debugf("error storing item %s: %s", key, err)
 			return err
 		}
 	}
@@ -171,24 +177,27 @@ func (c *MemoryCache) Store(key string, co *ContentObject) error {
 	c.objsMutex.Unlock()
 
 	logrus.Debugf("successfully stored item for %s", key)
-	storeMetric.WithLabelValues("success").Inc()
+	storeMetric.WithLabelValues("memory", "success").Inc()
 	return nil
 }
 
 // Purge deletes an item from the cache
 func (c *MemoryCache) Purge(key string) error {
+	start := time.Now()
+	defer purgeDuration.WithLabelValues("memory").Observe(time.Since(start).Seconds())
+
 	c.objsMutex.Lock()
 	co, ok := c.objs[key]
 	if !ok {
 		c.objsMutex.Unlock()
-		purgeMetric.WithLabelValues("miss").Inc()
+		purgeMetric.WithLabelValues("memory", "miss").Inc()
 		return fmt.Errorf("object not found")
 	}
 	c.memSize = c.memSize - co.Size()
 	delete(c.objs, key)
 	c.objsMutex.Unlock()
 	logrus.Debugf("successfully purged item %s", key)
-	purgeMetric.WithLabelValues("success").Inc()
+	purgeMetric.WithLabelValues("memory", "success").Inc()
 	return nil
 }
 
