@@ -1,8 +1,7 @@
-package api_test
+package api
 
 import (
 	"fmt"
-	"particles/api"
 	"testing"
 
 	yaml "gopkg.in/yaml.v2"
@@ -30,7 +29,7 @@ key_file: /tmp/test.key
 `
 
 func TestIsValid(t *testing.T) {
-	tests := []struct {
+	tt := []struct {
 		in     string
 		result bool
 		err    error
@@ -40,16 +39,16 @@ func TestIsValid(t *testing.T) {
 		{in: invalidPort, result: false, err: fmt.Errorf("configuration should be invalid because the port isn't a number")},
 	}
 
-	for _, test := range tests {
-		c := api.Conf{}
-		err := yaml.Unmarshal([]byte(test.in), &c)
+	for _, tc := range tt {
+		c := Conf{}
+		err := yaml.Unmarshal([]byte(tc.in), &c)
 		if err != nil {
 			t.Errorf("invalid config: %s", err)
 		}
 
 		valid, _ := c.IsValid()
-		if test.result != valid {
-			t.Errorf(test.err.Error())
+		if tc.result != valid {
+			t.Error(tc.err)
 		}
 	}
 }
