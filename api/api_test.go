@@ -11,6 +11,16 @@ import (
 )
 
 func TestPurgeHandler(t *testing.T) {
+	notFoundPR, err := json.Marshal(PurgeRequest{Resource: "www.wrong.com"})
+	if err != nil {
+		t.Error(err)
+	}
+
+	foundPR, err := json.Marshal(PurgeRequest{Resource: "www.example.com"})
+	if err != nil {
+		t.Error(err)
+	}
+
 	tt := []struct {
 		method string
 		data   []byte
@@ -40,16 +50,6 @@ func TestPurgeHandler(t *testing.T) {
 	c.Store("www.example.com", co)
 
 	a, err := NewAPI(ac, c)
-	if err != nil {
-		t.Error(err)
-	}
-
-	notFoundPR, err := json.Marshal(PurgeRequest{Resource: "www.wrong.com"})
-	if err != nil {
-		t.Error(err)
-	}
-
-	foundPR, err := json.Marshal(PurgeRequest{Resource: "www.example.com"})
 	if err != nil {
 		t.Error(err)
 	}

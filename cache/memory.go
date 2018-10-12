@@ -13,6 +13,8 @@ import (
 var (
 	// defaultMemLimit is the maximum amount of memory used by the cache
 	defaultMemLimit = 1073741824 // 1GB default memory limit
+	// defaultForcePurge enables the deletion of random items if no space can be freed up
+	defaultForcePurge = true
 )
 
 // MemoryCache represents a cache object
@@ -25,6 +27,7 @@ type MemoryCache struct {
 	memSize           int
 	hits              int
 	misses            int
+	forcePurge        bool
 }
 
 // MemoryCacheConfig is how the configuration for the memory cache is represented in the config file
@@ -32,6 +35,7 @@ type MemoryCacheConfig struct {
 	MemoryLimit int      `yaml:"memory_limit"` // mandatory, how much memory in bytes to use
 	TTL         int      `yaml:"ttl"`          // optional, how long each entry is cached for
 	Patterns    []string `yaml:"patterns"`     // optional, content-type patterns
+	ForcePurge  bool     `yaml:"force_purge"`  // optional, delete random items if memory can't be freed up
 }
 
 // MemoryItem is the structure used for the in-memory cache
@@ -68,7 +72,18 @@ func NewMemoryCache(options map[string]string) (*MemoryCache, error) {
 		return nil, err
 	}
 
-	return &MemoryCache{objs: make(map[string]*MemoryItem), contentTypeRegexp: regex, objsMutex: sync.RWMutex{}, memLimit: ml}, nil
+	// force purge
+	fp := defaultForcePurge
+	v, ok = options["force_purge"]
+	if ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing force_purge: %s", err)
+		}
+		fp = b
+	}
+
+	return &MemoryCache{objs: make(map[string]*MemoryItem), contentTypeRegexp: regex, objsMutex: sync.RWMutex{}, memLimit: ml, forcePurge: fp}, nil
 }
 
 // IsCachableContentType returns true in case the content type is one that can be cached
@@ -110,29 +125,52 @@ func (c *MemoryCache) Lookup(key string) (*ContentObject, bool, error) {
 
 // freeMemory frees up some space in the hash map to at least fit a new object of size bytes
 // By default it deletes entries that have been hit less than 10% of the current total hits received
-// by the cache
+// by the cache.
+// freeMemory is not accurate, to make sure we don't block requests, we avoid locking the map during the check.
 func (c *MemoryCache) freeMemory(size int) error {
 	logrus.Debugf("freeing up memory to allocate %d bytes", size)
 	var tbd []string
 	var fs int
 	// free memory by removing an entry that has been hit less than
 	// 10% of total hits
-	tenPercentHits := 10 * c.hits / 100
+	i := 10
+	done := false
 
-	for k, co := range c.objs {
-		if co.hits < tenPercentHits {
+	for i <= 50 && !done {
+		percentHits := i * c.hits / 100
+
+		for k, co := range c.objs {
+			// delete any expired item or items with a low percentage of hit rate
+			if time.Now().After(co.Expiration()) || co.hits < percentHits {
+				tbd = append(tbd, k)
+				fs = fs + co.Size()
+			}
+
+			if fs+c.memSize > size {
+				done = true
+				break
+			}
+		}
+		i++
+	}
+
+	// if we couldn't free enough space and the force purge is set, delete random items
+	if len(tbd) == 0 && c.forcePurge {
+		for k, co := range c.objs {
 			tbd = append(tbd, k)
 			fs = fs + co.Size()
+
+			if fs+c.memSize > size {
+				done = true
+				break
+			}
 		}
-		if fs > size {
-			break
-		}
-	}
-	c.purgeEntries(tbd)
-	if fs < size {
-		return fmt.Errorf("unable to free enough memory (%d/%d)", fs, size)
 	}
 
+	c.purgeEntries(tbd)
+	if fs+c.memSize < size {
+		return fmt.Errorf("unable to free enough memory (%d/%d)", fs, size)
+	}
 	logrus.Debugf("successfully freed memory %d", fs)
 	return nil
 }
@@ -153,6 +191,10 @@ func (c *MemoryCache) Store(key string, co *ContentObject) error {
 	defer storeDuration.WithLabelValues("memory").Observe(time.Since(start).Seconds())
 
 	size := len(co.Content())
+
+	if size > c.memLimit {
+		return fmt.Errorf("item %s can't fit in memory", key)
+	}
 	newSize := c.memSize + size
 	if newSize > c.memLimit {
 		storeMetric.WithLabelValues("memory", "memory_limit").Inc()
@@ -165,12 +207,13 @@ func (c *MemoryCache) Store(key string, co *ContentObject) error {
 	}
 
 	now := time.Now()
-	var ttl int
+	ttl := co.TTL()
 	if co.TTL() == 0 {
 		ttl = defaultTTL
+		co.ttl = defaultTTL
 	}
-	mi := &MemoryItem{co: co, timestamp: now, ttl: ttl, expiration: now.Add(time.Duration(ttl) * time.Second), contentSize: size}
 
+	mi := &MemoryItem{co: co, timestamp: now, ttl: ttl, expiration: now.Add(time.Duration(ttl) * time.Second), contentSize: size}
 	c.objsMutex.Lock()
 	c.objs[key] = mi
 	c.memSize = newSize

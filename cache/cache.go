@@ -73,7 +73,7 @@ func NewCache(conf Conf) (Cache, error) {
 
 // NewContentObject returns a new cache entry
 func NewContentObject(data []byte, contentType string, headers map[string]string, ttl int) *ContentObject {
-	return &ContentObject{content: data, ContentType: contentType, headers: headers}
+	return &ContentObject{content: data, ContentType: contentType, headers: headers, ttl: ttl}
 }
 
 // Content exposes the content bytes

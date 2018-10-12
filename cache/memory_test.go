@@ -110,3 +110,92 @@ func TestLookup(t *testing.T) {
 		}
 	}
 }
+
+func TestStore(t *testing.T) {
+	tt := []struct {
+		testCase string
+		key      string
+		data     []byte
+		ttl      int
+	}{
+		{"default item", "www.default.com", []byte("default item"), 0},
+		{"requires freeup space", "www.freeup.com", []byte("free up space"), 0},
+		{"custom ttl", "www.customttl.com", []byte("custom ttl"), 45},
+	}
+
+	cc := DefaultConf()
+	cc.Options["memory_limit"] = "20"
+	c, err := NewCache(cc)
+	if err != nil {
+		t.Error(err)
+	}
+
+	for _, tc := range tt {
+		co := NewContentObject(
+			tc.data,
+			"application/javascript",
+			map[string]string{"Content-Type": "application/javascript"},
+			tc.ttl,
+		)
+		err := c.Store(tc.key, co)
+		if err != nil {
+			t.Errorf("unexpected error value from store: %v", err)
+		}
+
+		r, found, err := c.Lookup(tc.key)
+		if err != nil {
+			t.Error(err)
+		}
+		if !found {
+			t.Errorf("item not found")
+		}
+		compTTL := 86400
+		if tc.ttl != 0 {
+			compTTL = tc.ttl
+		}
+		if r.TTL() != compTTL {
+			t.Errorf("ttl should be %d, but has %d", compTTL, r.TTL())
+		}
+	}
+
+	tterr := []struct {
+		testCase string
+		key      string
+		data     []byte
+		ttl      int
+		err      error
+	}{
+		{"can't free up memory", "www.cantfree.com", []byte("cant free up memory"), 0, fmt.Errorf("unable to free enough memory (0/19)")},
+		{"item can't fit in memory", "www.cantfit.com", []byte("this item can't fit in memory"), 0, fmt.Errorf("item www.cantfit.com can't fit in memory")},
+	}
+
+	cc = DefaultConf()
+	cc.Options["force_purge"] = "false"
+	cc.Options["memory_limit"] = "20"
+	c, err = NewCache(cc)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// load sample item
+	co := NewContentObject(
+		[]byte("01234567890123"),
+		"application/javascript",
+		map[string]string{"Content-Type": "application/javascript"},
+		0,
+	)
+	err = c.Store("filler", co)
+
+	for _, tc := range tterr {
+		co := NewContentObject(
+			tc.data,
+			"application/javascript",
+			map[string]string{"Content-Type": "application/javascript"},
+			tc.ttl,
+		)
+		err := c.Store(tc.key, co)
+		if err.Error() != tc.err.Error() {
+			t.Errorf("unexpected error value from store: %v, expected %v", err, tc.err)
+		}
+	}
+}
