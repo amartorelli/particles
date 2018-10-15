@@ -2,7 +2,6 @@ package cache
 
 import (
 	"errors"
-	"fmt"
 	"regexp"
 	"strconv"
 	"sync"
@@ -22,6 +21,8 @@ var (
 	errExpiredItem     = errors.New("expired item")
 	errConfMemoryLimit = errors.New("error parsing memory limit")
 	errConfForcePurge  = errors.New("error parsing force purge")
+	errFreeMemory      = errors.New("unable to free up memory")
+	errNotEnoughMemory = errors.New("unable to fit new item in cache")
 )
 
 // MemoryCache represents a cache object
@@ -176,7 +177,8 @@ func (c *MemoryCache) freeMemory(size int) error {
 
 	c.purgeEntries(tbd)
 	if fs+c.memSize < size {
-		return fmt.Errorf("unable to free enough memory (%d/%d)", fs, size)
+		logrus.Debugf("unable to free enough memory (%d/%d)", fs, size)
+		return errFreeMemory
 	}
 	logrus.Debugf("successfully freed memory %d", fs)
 	return nil
@@ -200,7 +202,8 @@ func (c *MemoryCache) Store(key string, co *ContentObject) error {
 	size := len(co.Content())
 
 	if size > c.memLimit {
-		return fmt.Errorf("item %s can't fit in memory", key)
+		logrus.Debugf("item %s can't fit in memory", key)
+		return errNotEnoughMemory
 	}
 	newSize := c.memSize + size
 	if newSize > c.memLimit {
