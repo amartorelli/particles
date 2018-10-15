@@ -61,7 +61,10 @@ func TestLookup(t *testing.T) {
 		map[string]string{"Content-Type": "application/javascript"},
 		10,
 	)
-	c.Store("www.valid.com", validCO)
+	err = c.Store("www.valid.com", validCO)
+	if err != nil {
+		t.Error(err)
+	}
 
 	notFoundCO := NewContentObject(
 		[]byte("notfound"),
@@ -69,7 +72,10 @@ func TestLookup(t *testing.T) {
 		map[string]string{"Content-Type": "application/javascript"},
 		10,
 	)
-	c.Store("www.not-found.com", notFoundCO)
+	err = c.Store("www.not-found.com", notFoundCO)
+	if err != nil {
+		t.Error(err)
+	}
 
 	invalidContentCO := NewContentObject(
 		[]byte("invalid"),
@@ -77,7 +83,10 @@ func TestLookup(t *testing.T) {
 		map[string]string{"Content-Type": "application/javascript"},
 		10,
 	)
-	c.Store("www.invalid-content.com", invalidContentCO)
+	err = c.Store("www.invalid-content.com", invalidContentCO)
+	if err != nil {
+		t.Error(err)
+	}
 
 	expiredCO := NewContentObject(
 		[]byte("expired"),
@@ -85,7 +94,10 @@ func TestLookup(t *testing.T) {
 		map[string]string{"Content-Type": "application/javascript"},
 		-3600,
 	)
-	c.Store("www.invalid-header.com", expiredCO)
+	err = c.Store("www.invalid-header.com", expiredCO)
+	if err != nil {
+		t.Error(err)
+	}
 
 	for _, tc := range tt {
 		co, found, err := c.Lookup(tc.key)
@@ -185,6 +197,9 @@ func TestStore(t *testing.T) {
 		0,
 	)
 	err = c.Store("filler", co)
+	if err != nil {
+		t.Error(err)
+	}
 
 	for _, tc := range tterr {
 		co := NewContentObject(
@@ -196,6 +211,41 @@ func TestStore(t *testing.T) {
 		err := c.Store(tc.key, co)
 		if err.Error() != tc.err.Error() {
 			t.Errorf("unexpected error value from store: %v, expected %v", err, tc.err)
+		}
+	}
+}
+
+func TestPurge(t *testing.T) {
+	tt := []struct {
+		key string
+		err error
+	}{
+		{"www.existing.com", nil},
+		{"www.non-existing.com", errNotFound},
+	}
+
+	cc := DefaultConf()
+	c, err := NewCache(cc)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// load sample item
+	co := NewContentObject(
+		[]byte("01234567890123"),
+		"application/javascript",
+		map[string]string{"Content-Type": "application/javascript"},
+		0,
+	)
+	err = c.Store("www.existing.com", co)
+	if err != nil {
+		t.Error(err)
+	}
+
+	for _, tc := range tt {
+		err = c.Purge(tc.key)
+		if err != tc.err {
+			t.Errorf("%s: %s", tc.key, err)
 		}
 	}
 }
