@@ -3,6 +3,7 @@ package cdn
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -15,6 +16,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+)
+
+var (
+	errCacheInit = errors.New("error initializing cache")
+	errAPIInit   = errors.New("error initializing API")
 )
 
 // CDN represents the CDN ojbect
@@ -40,13 +46,13 @@ func NewCDN(conf Conf) (*CDN, error) {
 	// Cache
 	c, err := cache.NewCache(conf.Cache)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing the cache: %s", err)
+		return nil, errCacheInit
 	}
 
 	// API
 	a, err := api.NewAPI(conf.API, c)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing the API: %s", err)
+		return nil, errAPIInit
 	}
 
 	mux := http.NewServeMux()

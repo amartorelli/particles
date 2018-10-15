@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"testing"
 
 	yaml "gopkg.in/yaml.v2"
@@ -32,11 +31,11 @@ func TestIsValid(t *testing.T) {
 	tt := []struct {
 		in     string
 		result bool
-		err    error
+		errMsg string
 	}{
-		{in: validConf, result: true, err: fmt.Errorf("configuration should be valid")},
-		{in: invalidAddress, result: false, err: fmt.Errorf("configuration should be invalid because the address isn't an valid IP")},
-		{in: invalidPort, result: false, err: fmt.Errorf("configuration should be invalid because the port isn't a number")},
+		{validConf, true, "configuration should be valid"},
+		{invalidAddress, false, "configuration should be invalid because the address isn't an valid IP"},
+		{invalidPort, false, "configuration should be invalid because the port isn't a number"},
 	}
 
 	for _, tc := range tt {
@@ -48,7 +47,7 @@ func TestIsValid(t *testing.T) {
 
 		valid, _ := c.IsValid()
 		if tc.result != valid {
-			t.Error(tc.err)
+			t.Error(tc.errMsg)
 		}
 	}
 }

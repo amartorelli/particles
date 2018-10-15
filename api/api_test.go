@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"particles/cache"
@@ -25,12 +24,12 @@ func TestPurgeHandler(t *testing.T) {
 		method string
 		data   []byte
 		code   int
-		err    error
+		errMsg string
 	}{
-		{"GET", []byte(""), http.StatusMethodNotAllowed, fmt.Errorf("A get request should be not allowed")},
-		{"POST", []byte("bad request"), http.StatusBadRequest, fmt.Errorf("An invalid purge request should return a bad request")},
-		{"POST", notFoundPR, http.StatusInternalServerError, fmt.Errorf("A request trying to purge an item that isn't present should return an internal error")},
-		{"POST", foundPR, http.StatusOK, fmt.Errorf("A request trying to purge an item that is present should return an OK code")},
+		{"GET", []byte(""), http.StatusMethodNotAllowed, "A get request should be not allowed"},
+		{"POST", []byte("bad request"), http.StatusBadRequest, "An invalid purge request should return a bad request"},
+		{"POST", notFoundPR, http.StatusInternalServerError, "A request trying to purge an item that isn't present should return an internal error"},
+		{"POST", foundPR, http.StatusOK, "A request trying to purge an item that is present should return an OK code"},
 	}
 
 	ac := DefaultConf()
@@ -65,7 +64,7 @@ func TestPurgeHandler(t *testing.T) {
 		a.purgeHandler(rr, req)
 
 		if rr.Code != tc.code {
-			t.Errorf("%s: expected %d, received %d", tc.err, tc.code, rr.Code)
+			t.Errorf("%s: expected %d, received %d", tc.errMsg, tc.code, rr.Code)
 		}
 	}
 }
