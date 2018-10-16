@@ -209,3 +209,59 @@ func TestPurge(t *testing.T) {
 		}
 	}
 }
+
+func TestPurgeEntries(t *testing.T) {
+	tt := []struct {
+		keys      []string
+		keysToDel []string
+		keysLeft  []string
+	}{
+		{[]string{"first", "second"}, []string{"second"}, []string{"first"}},
+		{[]string{"first", "second", "third"}, []string{"second"}, []string{"first", "third"}},
+		{[]string{"first", "firsta", "firstb"}, []string{"first"}, []string{"firsta", "firstb"}},
+	}
+
+	// item
+	co := NewContentObject(
+		[]byte("01234567890123"),
+		"application/javascript",
+		map[string]string{"Content-Type": "application/javascript"},
+		0,
+	)
+
+	for _, tc := range tt {
+		cc := DefaultConf()
+		c, err := NewCache(cc)
+		if err != nil {
+			t.Error(err)
+		}
+
+		// store items
+		for _, v := range tc.keys {
+			err = c.Store(v, co)
+			if err != nil {
+				t.Error(err)
+			}
+		}
+
+		// delete items
+		for _, v := range tc.keysToDel {
+			err = c.Store(v, co)
+			if err != nil {
+				t.Error(err)
+			}
+		}
+
+		// check remaining keys
+		for _, v := range tc.keysLeft {
+			_, found, err := c.Lookup(v)
+			if err != nil {
+				t.Error(err)
+			}
+			if !found {
+				t.Errorf("expected item %s not found", v)
+			}
+		}
+	}
+
+}
