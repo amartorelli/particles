@@ -6,28 +6,28 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-// validConf is a perfectly valid API configuration
-var validConf = `address: 192.168.1.10
+func TestIsValid(t *testing.T) {
+	// validConf is a perfectly valid API configuration
+	validConf := `address: 192.168.1.10
 port: 1234
 cert_file: /tmp/test.crt
 key_file: /tmp/test.key
 `
 
-// invalidAddress is an invalid configuration because the address isn't a valid IP
-var invalidAddress = `address: 192.168.1
+	// invalidAddress is an invalid configuration because the address isn't a valid IP
+	invalidAddress := `address: 192.168.1
 port: 1234
 cert_file: /tmp/test.crt
 key_file: /tmp/test.key
 `
 
-// invalidPort is an invalid configuration because the port is a negative number
-var invalidPort = `address: 192.168.1.10
+	// invalidPort is an invalid configuration because the port is a negative number
+	invalidPort := `address: 192.168.1.10
 port: -1
 cert_file: /tmp/test.crt
 key_file: /tmp/test.key
 `
 
-func TestIsValid(t *testing.T) {
 	tt := []struct {
 		in     string
 		result bool

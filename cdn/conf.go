@@ -106,7 +106,7 @@ func (hc HTTPConf) IsValid() (bool, string) {
 
 // IsValid checks the validity of a backend config
 func (bc BackendConf) IsValid() (bool, string) {
-	valid := bc.Name != "" && bc.Domain != "" && bc.IP != ""
+	valid := bc.Name != "" && bc.Domain != "" && net.ParseIP(bc.IP) != nil
 	if !valid {
 		return false, "invalid HTTP/HTTPS backend"
 	}
