@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"particles/cache"
-	"particles/util"
+	"particles/lib/cache"
+	"particles/lib/util"
 	"strconv"
 	"time"
 

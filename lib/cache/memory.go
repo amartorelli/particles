@@ -1,7 +1,7 @@
 package cache
 
 import (
-	"fmt"
+	"errors"
 	"regexp"
 	"strconv"
 	"sync"
@@ -15,6 +15,14 @@ var (
 	defaultMemLimit = 1073741824 // 1GB default memory limit
 	// defaultForcePurge enables the deletion of random items if no space can be freed up
 	defaultForcePurge = true
+
+	// errors
+	errNotFound        = errors.New("object not found")
+	errExpiredItem     = errors.New("expired item")
+	errConfMemoryLimit = errors.New("error parsing memory limit")
+	errConfForcePurge  = errors.New("error parsing force purge")
+	errFreeMemory      = errors.New("unable to free up memory")
+	errNotEnoughMemory = errors.New("unable to fit new item in cache")
 )
 
 // MemoryCache represents a cache object
@@ -56,7 +64,7 @@ func NewMemoryCache(options map[string]string) (*MemoryCache, error) {
 	if ok {
 		tmp, err := strconv.Atoi(options["memory_limit"])
 		if err != nil {
-			return nil, fmt.Errorf("error parsing memory_limit: %s", err)
+			return nil, errConfMemoryLimit
 		}
 		ml = tmp
 	}
@@ -78,7 +86,7 @@ func NewMemoryCache(options map[string]string) (*MemoryCache, error) {
 	if ok {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing force_purge: %s", err)
+			return nil, errConfForcePurge
 		}
 		fp = b
 	}
@@ -106,7 +114,7 @@ func (c *MemoryCache) Lookup(key string) (*ContentObject, bool, error) {
 			delete(c.objs, key)
 			c.objsMutex.RUnlock()
 			logrus.Debugf("item %s is expired", key)
-			return nil, false, fmt.Errorf("expired entry")
+			return nil, false, errExpiredItem
 		}
 		lookupMetric.WithLabelValues("memory", "hit").Inc()
 		mi.hits++
@@ -169,7 +177,8 @@ func (c *MemoryCache) freeMemory(size int) error {
 
 	c.purgeEntries(tbd)
 	if fs+c.memSize < size {
-		return fmt.Errorf("unable to free enough memory (%d/%d)", fs, size)
+		logrus.Debugf("unable to free enough memory (%d/%d)", fs, size)
+		return errFreeMemory
 	}
 	logrus.Debugf("successfully freed memory %d", fs)
 	return nil
@@ -193,7 +202,8 @@ func (c *MemoryCache) Store(key string, co *ContentObject) error {
 	size := len(co.Content())
 
 	if size > c.memLimit {
-		return fmt.Errorf("item %s can't fit in memory", key)
+		logrus.Debugf("item %s can't fit in memory", key)
+		return errNotEnoughMemory
 	}
 	newSize := c.memSize + size
 	if newSize > c.memLimit {
@@ -234,7 +244,7 @@ func (c *MemoryCache) Purge(key string) error {
 	if !ok {
 		c.objsMutex.Unlock()
 		purgeMetric.WithLabelValues("memory", "miss").Inc()
-		return fmt.Errorf("object not found")
+		return errNotFound
 	}
 	c.memSize = c.memSize - co.Size()
 	delete(c.objs, key)

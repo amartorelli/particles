@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 )
@@ -12,7 +13,10 @@ const (
 	defaultContentTypeRegex = "(^(image|audio|video)/.+$|^.+/javascript.*$|^text/css$)"
 )
 
-var validCacheTypes = []string{"memory", "memcached"}
+var (
+	validCacheTypes     = []string{"memory", "memcached"}
+	errInvalidCacheType = errors.New("invalid cache type specified")
+)
 
 // Conf is the configuration for the cache
 type Conf struct {
@@ -67,7 +71,7 @@ func NewCache(conf Conf) (Cache, error) {
 		}
 		return c, nil
 	default:
-		return nil, fmt.Errorf("no cache of type %s", conf.Type)
+		return nil, errInvalidCacheType
 	}
 }
 

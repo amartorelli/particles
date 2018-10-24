@@ -3,13 +3,18 @@ package cache
 import (
 	"bytes"
 	"encoding/gob"
-	"fmt"
+	"errors"
 	"regexp"
 	"time"
 
 	"github.com/sirupsen/logrus"
 
 	"github.com/bradfitz/gomemcache/memcache"
+)
+
+var (
+	errDecodingItem = errors.New("error decoding item")
+	errStoringItem  = errors.New("error storing item")
 )
 
 // MemcachedCache represents a cache object
@@ -85,7 +90,7 @@ func (c *MemcachedCache) Lookup(key string) (*ContentObject, bool, error) {
 	if err != nil {
 		logrus.Debugf("error decoding item for %s: %s", key, err)
 		lookupMetric.WithLabelValues("memcached", "error").Inc()
-		return nil, false, fmt.Errorf("error decoding item: %s", err)
+		return nil, false, errDecodingItem
 	}
 	lookupMetric.WithLabelValues("memcached", "success").Inc()
 
@@ -103,7 +108,7 @@ func (c *MemcachedCache) Store(key string, co *ContentObject) error {
 	err := enc.Encode(mi)
 	if err != nil {
 		logrus.Debugf("error encoding item to store for %s: %s", key, err)
-		return fmt.Errorf("error storing item %s: %s", key, err)
+		return errStoringItem
 	}
 
 	i := memcache.Item{

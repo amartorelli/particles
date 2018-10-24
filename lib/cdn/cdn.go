@@ -3,18 +3,24 @@ package cdn
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
-	"particles/api"
-	"particles/cache"
-	"particles/util"
+	"particles/lib/api"
+	"particles/lib/cache"
+	"particles/lib/util"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
+)
+
+var (
+	errCacheInit = errors.New("error initializing cache")
+	errAPIInit   = errors.New("error initializing API")
 )
 
 // CDN represents the CDN ojbect
@@ -40,13 +46,13 @@ func NewCDN(conf Conf) (*CDN, error) {
 	// Cache
 	c, err := cache.NewCache(conf.Cache)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing the cache: %s", err)
+		return nil, errCacheInit
 	}
 
 	// API
 	a, err := api.NewAPI(conf.API, c)
 	if err != nil {
-		return nil, fmt.Errorf("error initializing the API: %s", err)
+		return nil, errAPIInit
 	}
 
 	mux := http.NewServeMux()
@@ -201,15 +207,20 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	defer requestDuration.Observe(time.Since(start).Seconds())
 
-	defer req.Body.Close()
+	host := req.Host
+	h, _, err := net.SplitHostPort(req.Host)
+	if err == nil {
+		host = h
+	}
+	port := c.endpoints[host].Port
+	proto := c.endpoints[host].Proto
+	backend := fmt.Sprintf("%s://%s:%d", proto, host, port)
+	fr := fmt.Sprintf("%s%s", backend, req.URL.Path)
 
-	port := c.endpoints[req.Host].Port
-	proto := c.endpoints[req.Host].Proto
-	backend := fmt.Sprintf("%s://%s:%d", proto, req.Host, port)
-	fr := fmt.Sprintf("%s%s", backend, req.URL)
+	reqURL := req.URL.String()
 
 	// Do a lookup and if present return directly without making a HTTP request
-	content, found, err := c.cache.Lookup(fr)
+	content, found, err := c.cache.Lookup(reqURL)
 	if err != nil {
 		logrus.Debugf("error while looking up %s: %s", fr, err)
 	}
@@ -303,7 +314,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 				// the object is being stored, hence use a go routine
 				// Prefer serving the user as fast as possible rather than checking if
 				// there was an error storing the object. It will be picked up via metrics/logs.
-				go c.cache.Store(fr, co)
+				go c.cache.Store(reqURL, co)
 			}
 		}
 	}
