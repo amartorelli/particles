@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"particles/cache"
+	"particles/lib/cache"
 	"testing"
 )
 

@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"particles/cache"
+	"particles/lib/cache"
 	"strconv"
 	"strings"
 	"testing"

@@ -2,8 +2,8 @@ package cdn
 
 import (
 	"net"
-	"particles/api"
-	"particles/cache"
+	"particles/lib/api"
+	"particles/lib/cache"
 )
 
 // Conf is the cdn configuration

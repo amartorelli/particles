@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"particles/cdn"
+	"particles/lib/cdn"
 	"syscall"
 
 	"gopkg.in/yaml.v2"
