@@ -42,7 +42,7 @@ func NewAPI(conf Conf, cache cache.Cache) (*API, error) {
 // Start starts the API server
 func (a *API) Start() error {
 	a.mux.Handle("/metrics", promhttp.Handler())
-	a.mux.Handle("/purge", util.WithLogging(a.purgeHandler))
+	a.mux.Handle("/purge", util.HandlerWithLogging(a.purgeHandler))
 	// if certificates have been configured, start on HTTPS
 	// otherwise fold back to normal HTTP
 	if a.certFile != "" && a.keyFile != "" {

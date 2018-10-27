@@ -7,8 +7,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// WithLogging enables logging for requests
-func WithLogging(next http.HandlerFunc) http.HandlerFunc {
+// HandlerWithLogging enables logging for requests
+func HandlerWithLogging(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)

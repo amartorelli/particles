@@ -143,7 +143,7 @@ func (c *CDN) Start() <-chan struct{} {
 		return dialer.DialContext(ctx, network, addr)
 	}
 
-	c.httpMux.Handle("/", util.WithLogging(c.httpHandler))
+	c.httpMux.Handle("/", util.HandlerWithLogging(c.httpHandler))
 
 	// API server
 	go func() {
@@ -283,9 +283,10 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 			cachable := false
 
 			for _, s := range ccParts {
+				trimS := strings.TrimSpace(s)
 				// handle max age
-				if strings.HasPrefix(s, "max-age") {
-					maParts := strings.Split(s, "=")
+				if strings.HasPrefix(trimS, "max-age") {
+					maParts := strings.Split(trimS, "=")
 					newTTL, err := strconv.Atoi(maParts[1])
 					if err != nil {
 						logrus.Debugf("invalid TTL: %s", err)
@@ -295,8 +296,8 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 				}
 
 				// handle caching headers: cache only if we are allowed
-				if strings.ToLower(s) == "public" {
-					logrus.Debugf("Cache-Control: %s, it's ok to cache", s)
+				if strings.ToLower(trimS) == "public" {
+					logrus.Debugf("Cache-Control: %s, it's ok to cache", trimS)
 					cachable = true
 				}
 			}

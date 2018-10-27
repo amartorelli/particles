@@ -86,6 +86,11 @@ func TestHTTPHandler(t *testing.T) {
 		w.Header().Add("Cache-Control", "private")
 		fmt.Fprintf(w, "private content")
 	})
+	mux.HandleFunc("/maxage.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "text/css")
+		w.Header().Add("Cache-Control", "public, max-age=600")
+		fmt.Fprintf(w, "max-age")
+	})
 
 	s := &http.Server{
 		Addr:           ":7887",
@@ -239,6 +244,34 @@ func TestHTTPHandler(t *testing.T) {
 		t.Errorf("http://www.example.com/private.css isn't cachable and should not be added to the cache, but it's been found")
 	}
 
-	// TODO: test max-age
+	// max-age
+	rr = httptest.NewRecorder()
+	req, err = http.NewRequest("GET", "http://www.example.com/maxage.css", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cdn.httpHandler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("public object with max-age, expected status code %d, received %d", http.StatusOK, rr.Code)
+	}
+
+	if rr.Body.String() != "max-age" {
+		t.Errorf("public object with max-age, expected body is 'max-age', received '%s'", rr.Body.String())
+	}
+
+	time.Sleep(1 * time.Second)
+	item, found, err := cdn.cache.Lookup("http://www.example.com/maxage.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("http://www.example.com/maxage.css is cachable and should be added to the cache, but it's not been found")
+	}
+
+	if item.TTL() != 600 {
+		t.Errorf("http://www.example.com/maxage.css expected TTL is 600, found %d", item.TTL())
+	}
+
 	// TODO: test headers are correctly propagated to the cache and returned when reading from cache
 }
