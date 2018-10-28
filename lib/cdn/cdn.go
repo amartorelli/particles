@@ -203,6 +203,45 @@ func (c *CDN) Shutdown() error {
 	return nil
 }
 
+func isCachable(header string) bool {
+	ccParts := strings.Split(strings.TrimSpace(header), ",")
+	cachable := false
+	for _, s := range ccParts {
+		trimS := strings.TrimSpace(s)
+		if strings.ToLower(trimS) == "public" {
+			logrus.Debugf("Cache-Control: %s, it's ok to cache", trimS)
+			cachable = true
+		}
+	}
+	return cachable
+}
+
+func getMaxAge(header string) int {
+	var ttl int
+	ccParts := strings.Split(strings.TrimSpace(header), ",")
+	for _, s := range ccParts {
+		trimS := strings.TrimSpace(s)
+		if strings.HasPrefix(trimS, "max-age") {
+			maParts := strings.Split(trimS, "=")
+			newTTL, err := strconv.Atoi(maParts[1])
+			if err != nil {
+				logrus.Debugf("invalid TTL: %s", err)
+			} else {
+				ttl = newTTL
+			}
+		}
+	}
+	return ttl
+}
+
+func respHeadersToMap(resp *http.Response) map[string]string {
+	h := make(map[string]string, 0)
+	for k, v := range resp.Header {
+		h[k] = v[0]
+	}
+	return h
+}
+
 func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	defer requestDuration.Observe(time.Since(start).Seconds())
@@ -223,9 +262,11 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	content, found, err := c.cache.Lookup(reqURL)
 	if err != nil {
 		logrus.Debugf("error while looking up %s: %s", fr, err)
+		cacheMetric.WithLabelValues("lookup_error").Inc()
 	}
 	if found {
 		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
+		cacheMetric.WithLabelValues("hit").Inc()
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "error").Inc()
 		for k, v := range content.Headers() {
 			w.Header().Set(k, string(v))
@@ -271,51 +312,36 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	ct := resp.Header.Get("Content-Type")
-	if ct != "" {
+	// handle Content-Type header to cache if possible
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		logrus.Debugf("[%s] Content-type: %s", fr, ct)
+		ccParserMetric.WithLabelValues("content_type_present").Inc()
 		if c.cache.IsCachableContentType(ct) {
 			logrus.Debugf("content type can be cached")
+			ccParserMetric.WithLabelValues("content_type_cachable").Inc()
 
 			cc := resp.Header.Get("Cache-Control")
-			ccParts := strings.Split(strings.TrimSpace(cc), ",")
-			var ttl int
-			cachable := false
-
-			for _, s := range ccParts {
-				trimS := strings.TrimSpace(s)
-				// handle max age
-				if strings.HasPrefix(trimS, "max-age") {
-					maParts := strings.Split(trimS, "=")
-					newTTL, err := strconv.Atoi(maParts[1])
-					if err != nil {
-						logrus.Debugf("invalid TTL: %s", err)
-					} else {
-						ttl = newTTL
-					}
-				}
-
-				// handle caching headers: cache only if we are allowed
-				if strings.ToLower(trimS) == "public" {
-					logrus.Debugf("Cache-Control: %s, it's ok to cache", trimS)
-					cachable = true
-				}
-			}
-
-			if cachable {
+			if cc != "" && isCachable(cc) {
 				logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
+				ccParserMetric.WithLabelValues("cache_control_cachable").Inc()
 
+				ttl := getMaxAge(cc)
 				// we also want to store the headers
-				h := make(map[string]string, 0)
-				for k, v := range resp.Header {
-					h[k] = v[0]
-				}
+				h := respHeadersToMap(resp)
 				co := cache.NewContentObject(rb, ct, h, ttl)
 				// avoid delaying the response to the user because
 				// the object is being stored, hence use a go routine
 				// Prefer serving the user as fast as possible rather than checking if
 				// there was an error storing the object. It will be picked up via metrics/logs.
-				go c.cache.Store(reqURL, co)
+				go func() {
+					err := c.cache.Store(reqURL, co)
+					if err != nil {
+						logrus.Errorf("error storing cache item %s: %s", reqURL, err)
+						cacheMetric.WithLabelValues("store_error").Inc()
+					}
+					logrus.Debugf("successfully stored item %s", reqURL)
+					cacheMetric.WithLabelValues("stored").Inc()
+				}()
 			}
 		}
 	}

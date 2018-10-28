@@ -275,3 +275,41 @@ func TestHTTPHandler(t *testing.T) {
 
 	// TODO: test headers are correctly propagated to the cache and returned when reading from cache
 }
+
+func TestIsCachable(t *testing.T) {
+	tt := []struct {
+		header   string
+		cachable bool
+		errMsg   string
+	}{
+		{"public", true, "public Cache-Control header should be cachable"},
+		{"public, max-age=3600", true, "public Cache-Control header with max-age should be cachable"},
+		{"private", false, "private Cache-Control header should not be cachable"},
+		{"no-store", false, "no-store Cache-Control header should not be cachable"},
+		{"no-cache", false, "no-cache Cache-Control header should not be cachable"},
+	}
+
+	for _, tc := range tt {
+		if isCachable(tc.header) != tc.cachable {
+			t.Error(tc.errMsg)
+		}
+	}
+}
+
+func TestGetMaxAge(t *testing.T) {
+	tt := []struct {
+		header string
+		expTTL int
+		errMsg string
+	}{
+		{"public", 0, "expected max-age 0 because unspecified"},
+		{"public, max-age=3600", 3600, "public Cache-Control header with max-age=3600 should return 3600"},
+		{"private, max-age=3600", 3600, "private Cache-Control header with max-age=3600 should return 3600"},
+	}
+
+	for _, tc := range tt {
+		if getMaxAge(tc.header) != tc.expTTL {
+			t.Error(tc.errMsg)
+		}
+	}
+}

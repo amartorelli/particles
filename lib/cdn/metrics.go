@@ -15,4 +15,14 @@ var (
 		Name: "particles_requests_seconds",
 		Help: "Requests duration received by the CDN",
 	})
+
+	cacheMetric = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "particles_requests_cache_total",
+		Help: "Requests received by the CDN",
+	}, []string{"status"})
+
+	ccParserMetric = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "particles_requests_contenttype_parser_total",
+		Help: "Status of the parser when analysing the response headers",
+	}, []string{"event"})
 )
