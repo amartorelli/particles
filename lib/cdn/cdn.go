@@ -8,13 +8,13 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"particles/lib/api"
-	"particles/lib/cache"
-	"particles/lib/util"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/amartorelli/particles/lib/api"
+	"github.com/amartorelli/particles/lib/cache"
+	"github.com/amartorelli/particles/lib/util"
 	"github.com/sirupsen/logrus"
 )
 

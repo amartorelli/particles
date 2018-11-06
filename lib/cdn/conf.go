@@ -2,8 +2,9 @@ package cdn
 
 import (
 	"net"
-	"particles/lib/api"
-	"particles/lib/cache"
+
+	"github.com/amartorelli/particles/lib/api"
+	"github.com/amartorelli/particles/lib/cache"
 )
 
 // Conf is the cdn configuration

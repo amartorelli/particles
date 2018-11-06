@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"particles/lib/cache"
 	"testing"
+
+	"github.com/amartorelli/particles/lib/cache"
 )
 
 func TestPurgeHandler(t *testing.T) {

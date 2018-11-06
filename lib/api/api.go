@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"particles/lib/cache"
-	"particles/lib/util"
 	"strconv"
 	"time"
 
+	"github.com/amartorelli/particles/lib/cache"
+	"github.com/amartorelli/particles/lib/util"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 )

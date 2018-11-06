@@ -6,11 +6,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"particles/lib/cache"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/amartorelli/particles/lib/cache"
 )
 
 var exampleContent = `<!doctype html>

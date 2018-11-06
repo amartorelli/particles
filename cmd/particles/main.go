@@ -5,11 +5,11 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"particles/lib/cdn"
 	"syscall"
 
 	"gopkg.in/yaml.v2"
 
+	"github.com/amartorelli/particles/lib/cdn"
 	"github.com/sirupsen/logrus"
 )
 
