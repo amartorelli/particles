@@ -1,5 +1,7 @@
 # Particles
 
+[![Build Status](https://travis-ci.org/amartorelli/particles.svg?branch=master)](https://travis-ci.org/amartorelli/particles)
+
 Particles is a very simple CDN service written in Go.
 With Particles you can handle multiple domains by defining them in the configuration file.
 It also supports certificates so that you can load the keys and certs of HTTPS website you wish to use the CDN for.
