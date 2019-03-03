@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/amartorelli/particles/lib/cache"
+	"github.com/amartorelli/particles/pkg/cache"
 )
 
 var exampleContent = `<!doctype html>

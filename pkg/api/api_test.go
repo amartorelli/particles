@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/amartorelli/particles/lib/cache"
+	"github.com/amartorelli/particles/pkg/cache"
 )
 
 func TestPurgeHandler(t *testing.T) {

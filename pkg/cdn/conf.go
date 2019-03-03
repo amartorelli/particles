@@ -3,8 +3,8 @@ package cdn
 import (
 	"net"
 
-	"github.com/amartorelli/particles/lib/api"
-	"github.com/amartorelli/particles/lib/cache"
+	"github.com/amartorelli/particles/pkg/api"
+	"github.com/amartorelli/particles/pkg/cache"
 )
 
 // Conf is the cdn configuration

@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/amartorelli/particles/lib/cache"
-	"github.com/amartorelli/particles/lib/util"
+	"github.com/amartorelli/particles/pkg/cache"
+	"github.com/amartorelli/particles/pkg/util"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 )
