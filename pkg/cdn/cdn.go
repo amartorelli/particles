@@ -267,7 +267,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	if found {
 		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
 		cacheMetric.WithLabelValues("hit").Inc()
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "error").Inc()
+		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "success").Inc()
 		for k, v := range content.Headers() {
 			w.Header().Set(k, string(v))
 		}
