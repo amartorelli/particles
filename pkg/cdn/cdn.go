@@ -35,6 +35,7 @@ type CDN struct {
 	endpoints    map[string]endpoint
 }
 
+// endpoint is a structure to represent an endpoint handled by the Particles
 type endpoint struct {
 	IP    string
 	Port  int
@@ -203,6 +204,7 @@ func (c *CDN) Shutdown() error {
 	return nil
 }
 
+// isCachable checks if the Cache-Control header specifies the resource as public
 func isCachable(header string) bool {
 	ccParts := strings.Split(strings.TrimSpace(header), ",")
 	cachable := false
@@ -216,6 +218,7 @@ func isCachable(header string) bool {
 	return cachable
 }
 
+// getMaxAge returns the value of the max-age section
 func getMaxAge(header string) int {
 	var ttl int
 	ccParts := strings.Split(strings.TrimSpace(header), ",")
@@ -234,6 +237,7 @@ func getMaxAge(header string) int {
 	return ttl
 }
 
+// respHeadersToMap converts headers in  respons to a map of strings
 func respHeadersToMap(resp *http.Response) map[string]string {
 	h := make(map[string]string, 0)
 	for k, v := range resp.Header {
@@ -242,6 +246,13 @@ func respHeadersToMap(resp *http.Response) map[string]string {
 	return h
 }
 
+// cleanHeadersMap removes from a map of headers all the headers that shouldn't be cached
+func cleanHeadersMap(hh map[string]string) map[string]string {
+	// TODO: this function should strip out headers that shouldn't be cached
+	return hh
+}
+
+// httpHandler is the main handler for the CDN
 func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	defer requestDuration.Observe(time.Since(start).Seconds())
@@ -327,7 +338,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 
 				ttl := getMaxAge(cc)
 				// we also want to store the headers
-				h := respHeadersToMap(resp)
+				h := cleanHeadersMap(respHeadersToMap(resp))
 				co := cache.NewContentObject(rb, ct, h, ttl)
 				// avoid delaying the response to the user because
 				// the object is being stored, hence use a go routine
