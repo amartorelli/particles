@@ -95,6 +95,7 @@ func (co *ContentObject) Headers() map[string]string {
 	return co.headers
 }
 
+// contentTypeRegex compiles a regex to be used to check cachable Content-Type
 func contentTypeRegex(patterns string) (*regexp.Regexp, error) {
 	if patterns != "" {
 		return regexp.Compile(fmt.Sprintf("(%s)", patterns))
