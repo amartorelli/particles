@@ -3,6 +3,7 @@ package cache
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestIsCachableContentType(t *testing.T) {
@@ -59,6 +60,7 @@ func TestLookup(t *testing.T) {
 		"application/javascript",
 		map[string]string{"Content-Type": "application/javascript"},
 		10,
+		time.Now().Unix(),
 	)
 	err = c.Store("www.valid.com", validCO)
 	if err != nil {
@@ -70,6 +72,7 @@ func TestLookup(t *testing.T) {
 		"application/javascript",
 		map[string]string{"Content-Type": "application/javascript"},
 		10,
+		time.Now().Unix(),
 	)
 	err = c.Store("www.not-found.com", notFoundCO)
 	if err != nil {
@@ -81,6 +84,7 @@ func TestLookup(t *testing.T) {
 		"application/javascript",
 		map[string]string{"Content-Type": "application/javascript"},
 		10,
+		time.Now().Unix(),
 	)
 	err = c.Store("www.invalid-content.com", invalidContentCO)
 	if err != nil {
@@ -92,6 +96,7 @@ func TestLookup(t *testing.T) {
 		"application/word",
 		map[string]string{"Content-Type": "application/javascript"},
 		-3600,
+		time.Now().Unix(),
 	)
 	err = c.Store("www.invalid-header.com", expiredCO)
 	if err != nil {
@@ -151,6 +156,7 @@ func TestStore(t *testing.T) {
 			"application/javascript",
 			map[string]string{"Content-Type": "application/javascript"},
 			tc.ttl,
+			time.Now().Unix(),
 		)
 		err := c.Store(tc.key, co)
 		if err != tc.err {
@@ -196,6 +202,7 @@ func TestPurge(t *testing.T) {
 		"application/javascript",
 		map[string]string{"Content-Type": "application/javascript"},
 		0,
+		time.Now().Unix(),
 	)
 	err = c.Store("www.existing.com", co)
 	if err != nil {
@@ -227,6 +234,7 @@ func TestPurgeEntries(t *testing.T) {
 		"application/javascript",
 		map[string]string{"Content-Type": "application/javascript"},
 		0,
+		time.Now().Unix(),
 	)
 
 	for _, tc := range tt {

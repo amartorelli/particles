@@ -123,6 +123,7 @@ func TestHTTPHandler(t *testing.T) {
 		"text/css",
 		make(map[string]string),
 		10,
+		time.Now().Unix(),
 	)
 	cdn.cache.Store("http://www.example.com/style.css", co)
 

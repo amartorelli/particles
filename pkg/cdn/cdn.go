@@ -1,10 +1,12 @@
 package cdn
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -33,6 +35,7 @@ type CDN struct {
 	httpsEnabled bool
 	httpMux      *http.ServeMux
 	endpoints    map[string]endpoint
+	httpClient   *http.Client
 }
 
 // endpoint is a structure to represent an endpoint handled by the Particles
@@ -106,7 +109,17 @@ func NewCDN(conf Conf) (*CDN, error) {
 		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "https"}
 	}
 
-	return &CDN{api: a, cache: c, httpServer: s, httpEnabled: len(conf.HTTP.Backends) > 0, httpsServer: ss, httpsEnabled: len(conf.HTTPS.Backends) > 0, httpMux: mux, endpoints: eps}, nil
+	return &CDN{
+		api:          a,
+		cache:        c,
+		httpServer:   s,
+		httpEnabled:  len(conf.HTTP.Backends) > 0,
+		httpsServer:  ss,
+		httpsEnabled: len(conf.HTTPS.Backends) > 0,
+		httpMux:      mux,
+		endpoints:    eps,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
+	}, nil
 }
 
 // Start starts the CDN by starting the HTTP/HTTPS endpoint and API. It returns a channel which can be
@@ -252,6 +265,10 @@ func cleanHeadersMap(hh map[string]string) map[string]string {
 	return hh
 }
 
+func revalidate(method, fr string, body io.Reader) {
+	// TODO: implement revalidate
+}
+
 // httpHandler is the main handler for the CDN
 func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
@@ -275,10 +292,28 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		logrus.Debugf("error while looking up %s: %s", fr, err)
 		cacheMetric.WithLabelValues("lookup_error").Inc()
 	}
+
+	reqBody, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		logrus.Errorf("error reading request body: %s", err)
+		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	if found {
+		// check if the URL needs to be revalidated. Revalidate if 15m have elapsed
+		if time.Now().Sub(time.Unix(content.CachedTimestamp(), 0).Add(15*time.Minute)) > 0 {
+			// revalidate
+			// TODO: add metrics
+			// If-Modified-Since: Fri, 25 Nov 2016 06:24:22 GM
+			revalidate(req.Method, fr, bytes.NewReader(reqBody))
+		}
+
 		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
 		cacheMetric.WithLabelValues("hit").Inc()
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "success").Inc()
+
 		for k, v := range content.Headers() {
 			w.Header().Set(k, string(v))
 		}
@@ -288,9 +323,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	logrus.Debugf("cache miss: %s", fr)
-	// creating a client to send the full request
-	client := &http.Client{}
-	r, err := http.NewRequest(req.Method, fr, req.Body)
+	r, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
 	if err != nil {
 		logrus.Errorf("error creating a new proxy request: %s", err)
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
@@ -305,7 +338,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// execute the request to the backend
-	resp, err := client.Do(r)
+	resp, err := c.httpClient.Do(r)
 	if err != nil {
 		logrus.Errorf("error proxying request: %s", err)
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
@@ -323,6 +356,16 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// forward response headers
+	for k, v := range resp.Header {
+		w.Header().Set(k, v[0])
+	}
+
+	// respond to client as soon as possible
+	requestsMetric.WithLabelValues(strconv.Itoa(resp.StatusCode), "success").Inc()
+	w.WriteHeader(resp.StatusCode)
+	w.Write(rb)
+
 	// handle Content-Type header to cache if possible
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		logrus.Debugf("[%s] Content-type: %s", fr, ct)
@@ -339,7 +382,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 				ttl := getMaxAge(cc)
 				// we also want to store the headers
 				h := cleanHeadersMap(respHeadersToMap(resp))
-				co := cache.NewContentObject(rb, ct, h, ttl)
+				co := cache.NewContentObject(rb, ct, h, ttl, time.Now().Unix())
 				// avoid delaying the response to the user because
 				// the object is being stored, hence use a go routine
 				// Prefer serving the user as fast as possible rather than checking if
@@ -356,13 +399,4 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-
-	// forward response headers
-	for k, v := range resp.Header {
-		w.Header().Set(k, v[0])
-	}
-
-	requestsMetric.WithLabelValues(strconv.Itoa(resp.StatusCode), "success").Inc()
-	w.WriteHeader(resp.StatusCode)
-	w.Write(rb)
 }
