@@ -265,8 +265,23 @@ func cleanHeadersMap(hh map[string]string) map[string]string {
 	return hh
 }
 
-func revalidate(method, fr string, body io.Reader) {
+func revalidate(method, fr string, body io.Reader) (revalidated bool, resp *http.Response, err error) {
 	// TODO: implement revalidate
+	return false, nil, nil
+}
+
+func shouldRevalidate(c *cache.ContentObject, d time.Duration) bool {
+	return time.Now().Sub(time.Unix(c.CachedTimestamp(), 0).Add(d)) > 0
+}
+
+func respond(w http.ResponseWriter, hh http.Header, body []byte) error {
+	for k, v := range hh {
+		w.Header().Set(k, v[0])
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
+	return nil
 }
 
 // httpHandler is the main handler for the CDN
@@ -303,25 +318,42 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 
 	if found {
 		// check if the URL needs to be revalidated. Revalidate if 15m have elapsed
-		if time.Now().Sub(time.Unix(content.CachedTimestamp(), 0).Add(15*time.Minute)) > 0 {
+		if shouldRevalidate(content, 15*time.Second) {
 			// revalidate
 			// TODO: add metrics
 			// If-Modified-Since: Fri, 25 Nov 2016 06:24:22 GM
-			revalidate(req.Method, fr, bytes.NewReader(reqBody))
+			revalidated, resp, err := revalidate(req.Method, fr, bytes.NewReader(reqBody))
+			if err != nil {
+				logrus.Errorf("error revalidating cached item: %s", err)
+				// TODO: add metrics
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			if revalidated && resp != nil {
+				body, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					logrus.Errorf("error reading revalidated body: %s", err)
+					// TODO: add metrics
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				respond(w, resp.Header, body)
+			}
+			return
 		}
 
 		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
 		cacheMetric.WithLabelValues("hit").Inc()
 		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "success").Inc()
 
+		hh := http.Header{}
 		for k, v := range content.Headers() {
-			w.Header().Set(k, string(v))
+			hh[k] = []string{v}
 		}
-		w.WriteHeader(http.StatusOK)
-		w.Write(content.Content())
+
+		respond(w, hh, content.Content())
 		return
 	}
 
+	// cache miss, fetch content again
 	logrus.Debugf("cache miss: %s", fr)
 	r, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
 	if err != nil {
@@ -356,15 +388,10 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// forward response headers
-	for k, v := range resp.Header {
-		w.Header().Set(k, v[0])
-	}
+	requestsMetric.WithLabelValues(strconv.Itoa(resp.StatusCode), "success").Inc()
 
 	// respond to client as soon as possible
-	requestsMetric.WithLabelValues(strconv.Itoa(resp.StatusCode), "success").Inc()
-	w.WriteHeader(resp.StatusCode)
-	w.Write(rb)
+	respond(w, resp.Header, rb)
 
 	// handle Content-Type header to cache if possible
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
