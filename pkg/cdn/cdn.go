@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -267,13 +266,27 @@ func cleanHeadersMap(hh map[string]string) map[string]string {
 }
 
 // validate implements the validation by sending a request with the If-Modified-Since header
-func validate(method, fr string, body io.Reader) (validated bool, resp *http.Response, err error) {
-	// TODO: implement validate
-	return false, nil, nil
+func (c *CDN) validate(req *http.Request) (validated bool, resp *http.Response, err error) {
+	// execute the request to the backend
+	resp, err = c.httpClient.Do(req)
+	if err != nil {
+		return false, nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		return false, nil, nil
+	}
+
+	return true, resp, nil
 }
 
 // shouldValidate checks if the content has changed since we cached it
 func shouldValidate(c *cache.ContentObject, d time.Duration) bool {
+	if c.CachedTimestamp() == 0 {
+		return true
+	}
+
 	return time.Now().Sub(time.Unix(c.CachedTimestamp(), 0).Add(d)) > 0
 }
 
@@ -328,7 +341,17 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		// check if the URL needs to be validated. Validate if 15m have elapsed
 		if shouldValidate(content, 15*time.Second) {
 			// validate
-			validated, resp, err := validate(req.Method, fr, bytes.NewReader(reqBody))
+			tmpReq, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
+			if err != nil {
+				logrus.Errorf("error creating validation request: %s", err)
+				validationErrorsMetric.WithLabelValues(host).Inc()
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			for k, v := range req.Header {
+				req.Header.Set(k, strings.Join(v, " "))
+			}
+
+			validated, resp, err := c.validate(tmpReq)
 			if err != nil {
 				logrus.Errorf("error validating cached item: %s", err)
 				validationErrorsMetric.WithLabelValues(host).Inc()

@@ -319,6 +319,21 @@ func TestGetMaxAge(t *testing.T) {
 func TestShouldValidate(t *testing.T) {
 	// TODO: we need to fabricate an object that is found in cache but
 	// requires revalidation
+	tt := []struct {
+		c              *cache.ContentObject
+		d              time.Duration
+		shouldValidate bool
+	}{
+		{cache.NewContentObject(nil, "", make(map[string]string, 0), 0, 0), 5 * time.Minute, true},
+		{cache.NewContentObject(nil, "", make(map[string]string, 0), 0, time.Now().Add(-10*time.Minute).Unix()), 15 * time.Minute, false},
+		{cache.NewContentObject(nil, "", make(map[string]string, 0), 0, time.Now().Add(-20*time.Minute).Unix()), 15 * time.Minute, true},
+	}
+
+	for _, tc := range tt {
+		if shouldValidate(tc.c, tc.d) != tc.shouldValidate {
+			t.Errorf("shouldValidate for object with cachedTimestamp %v and delta %v should return %v", tc.c.CachedTimestamp(), tc.d, tc.shouldValidate)
+		}
+	}
 }
 
 func TestCleanHeadersMap(t *testing.T) {
