@@ -317,8 +317,6 @@ func TestGetMaxAge(t *testing.T) {
 }
 
 func TestShouldValidate(t *testing.T) {
-	// TODO: we need to fabricate an object that is found in cache but
-	// requires revalidation
 	tt := []struct {
 		c              *cache.ContentObject
 		d              time.Duration
