@@ -290,9 +290,10 @@ func respond(w http.ResponseWriter, hh http.Header, body []byte) error {
 // httpHandler is the main handler for the CDN
 func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
-	defer requestDuration.Observe(time.Since(start).Seconds())
 
 	host := req.Host
+	defer requestDuration.WithLabelValues(host).Observe(time.Since(start).Seconds())
+
 	h, _, err := net.SplitHostPort(req.Host)
 	if err == nil {
 		host = h
@@ -308,7 +309,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	content, found, err := c.cache.Lookup(reqURL)
 	if err != nil {
 		logrus.Debugf("error while looking up %s: %s", fr, err)
-		cacheMetric.WithLabelValues("lookup_error").Inc()
+		cacheMetric.WithLabelValues(host, "lookup_error").Inc()
 	}
 
 	var reqBody []byte
@@ -316,7 +317,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		reqBody, err = ioutil.ReadAll(req.Body)
 		if err != nil {
 			logrus.Errorf("error reading request body: %s", err)
-			requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+			requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusBadRequest), "error").Inc()
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -328,16 +329,16 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 			// validate
 			validated, resp, err := validate(req.Method, fr, bytes.NewReader(reqBody))
 			if err != nil {
-				logrus.Errorf("error revalidating cached item: %s", err)
-				validationErrorsMetric.Inc()
+				logrus.Errorf("error validating cached item: %s", err)
+				validationErrorsMetric.WithLabelValues(host).Inc()
 				w.WriteHeader(http.StatusInternalServerError)
 			}
 			if validated && resp != nil {
-				validationMetric.Inc()
+				validationMetric.WithLabelValues(host).Inc()
 				body, err := ioutil.ReadAll(resp.Body)
 				if err != nil {
 					logrus.Errorf("error reading validated body: %s", err)
-					validationErrorsMetric.Inc()
+					validationErrorsMetric.WithLabelValues(host).Inc()
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 				respond(w, resp.Header, body)
@@ -346,8 +347,8 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		}
 
 		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
-		cacheMetric.WithLabelValues("hit").Inc()
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "success").Inc()
+		cacheMetric.WithLabelValues(host, "hit").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusOK), "success").Inc()
 
 		hh := http.Header{}
 		for k, v := range content.Headers() {
@@ -363,7 +364,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	r, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
 	if err != nil {
 		logrus.Errorf("error creating a new proxy request: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusBadRequest), "error").Inc()
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -378,7 +379,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	resp, err := c.httpClient.Do(r)
 	if err != nil {
 		logrus.Errorf("error proxying request: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusBadRequest), "error").Inc()
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -388,12 +389,12 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	rb, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		logrus.Errorf("error reading response body: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusInternalServerError), "error").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusInternalServerError), "error").Inc()
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	requestsMetric.WithLabelValues(strconv.Itoa(resp.StatusCode), "success").Inc()
+	requestsMetric.WithLabelValues(host, strconv.Itoa(resp.StatusCode), "success").Inc()
 
 	// respond to client as soon as possible
 	respond(w, resp.Header, rb)
@@ -405,14 +406,14 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	logrus.Debugf("[%s] Content-type: %s", fr, ct)
-	ccParserMetric.WithLabelValues("content_type_present").Inc()
+	ccParserMetric.WithLabelValues(host, "content_type_present").Inc()
 	if !c.cache.IsCachableContentType(ct) {
 		logrus.Debugf("content type cannot be cached")
 		return
 	}
 
 	logrus.Debugf("content type can be cached")
-	ccParserMetric.WithLabelValues("content_type_cachable").Inc()
+	ccParserMetric.WithLabelValues(host, "content_type_cachable").Inc()
 
 	cc := resp.Header.Get("Cache-Control")
 	if cc == "" || !isCachable(cc) {
@@ -421,7 +422,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
-	ccParserMetric.WithLabelValues("cache_control_cachable").Inc()
+	ccParserMetric.WithLabelValues(host, "cache_control_cachable").Inc()
 
 	ttl := getMaxAge(cc)
 	// we also want to store the headers
@@ -434,9 +435,9 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		err := c.cache.Store(reqURL, co)
 		if err != nil {
 			logrus.Errorf("error storing cache item %s: %s", reqURL, err)
-			cacheMetric.WithLabelValues("store_error").Inc()
+			cacheMetric.WithLabelValues(host, "store_error").Inc()
 		}
 		logrus.Debugf("successfully stored item %s", reqURL)
-		cacheMetric.WithLabelValues("stored").Inc()
+		cacheMetric.WithLabelValues(host, "stored").Inc()
 	}()
 }
