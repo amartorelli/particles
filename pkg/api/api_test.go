@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/amartorelli/particles/pkg/cache"
 )
@@ -46,6 +47,7 @@ func TestPurgeHandler(t *testing.T) {
 		"text/html",
 		make(map[string]string),
 		10,
+		time.Now().Unix(),
 	)
 	c.Store("www.example.com", co)
 

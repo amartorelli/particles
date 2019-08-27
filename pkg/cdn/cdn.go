@@ -308,12 +308,15 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 		cacheMetric.WithLabelValues("lookup_error").Inc()
 	}
 
-	reqBody, err := ioutil.ReadAll(req.Body)
-	if err != nil {
-		logrus.Errorf("error reading request body: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
-		w.WriteHeader(http.StatusBadRequest)
-		return
+	var reqBody []byte
+	if req.Body != nil {
+		reqBody, err = ioutil.ReadAll(req.Body)
+		if err != nil {
+			logrus.Errorf("error reading request body: %s", err)
+			requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 	}
 
 	if found {
