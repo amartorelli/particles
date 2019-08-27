@@ -397,36 +397,44 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	respond(w, resp.Header, rb)
 
 	// handle Content-Type header to cache if possible
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		logrus.Debugf("[%s] Content-type: %s", fr, ct)
-		ccParserMetric.WithLabelValues("content_type_present").Inc()
-		if c.cache.IsCachableContentType(ct) {
-			logrus.Debugf("content type can be cached")
-			ccParserMetric.WithLabelValues("content_type_cachable").Inc()
-
-			cc := resp.Header.Get("Cache-Control")
-			if cc != "" && isCachable(cc) {
-				logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
-				ccParserMetric.WithLabelValues("cache_control_cachable").Inc()
-
-				ttl := getMaxAge(cc)
-				// we also want to store the headers
-				h := cleanHeadersMap(respHeadersToMap(resp))
-				co := cache.NewContentObject(rb, ct, h, ttl, time.Now().Unix())
-				// avoid delaying the response to the user because
-				// the object is being stored, hence use a go routine
-				// Prefer serving the user as fast as possible rather than checking if
-				// there was an error storing the object. It will be picked up via metrics/logs.
-				go func() {
-					err := c.cache.Store(reqURL, co)
-					if err != nil {
-						logrus.Errorf("error storing cache item %s: %s", reqURL, err)
-						cacheMetric.WithLabelValues("store_error").Inc()
-					}
-					logrus.Debugf("successfully stored item %s", reqURL)
-					cacheMetric.WithLabelValues("stored").Inc()
-				}()
-			}
-		}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		return
 	}
+
+	logrus.Debugf("[%s] Content-type: %s", fr, ct)
+	ccParserMetric.WithLabelValues("content_type_present").Inc()
+	if !c.cache.IsCachableContentType(ct) {
+		logrus.Debugf("content type cannot be cached")
+		return
+	}
+
+	logrus.Debugf("content type can be cached")
+	ccParserMetric.WithLabelValues("content_type_cachable").Inc()
+
+	cc := resp.Header.Get("Cache-Control")
+	if cc == "" || !isCachable(cc) {
+		logrus.Info("empty cache control header or non cachablecontent")
+		return
+	}
+
+	logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
+	ccParserMetric.WithLabelValues("cache_control_cachable").Inc()
+
+	ttl := getMaxAge(cc)
+	// we also want to store the headers
+	hh := cleanHeadersMap(respHeadersToMap(resp))
+	co := cache.NewContentObject(rb, ct, hh, ttl, time.Now().Unix())
+	// avoid keeping the handler busy while storing the object in cache
+	// Prefer freeing up the handler as fast as possible rather than checking if
+	// there was an error storing the object. It will be picked up via metrics/logs.
+	go func() {
+		err := c.cache.Store(reqURL, co)
+		if err != nil {
+			logrus.Errorf("error storing cache item %s: %s", reqURL, err)
+			cacheMetric.WithLabelValues("store_error").Inc()
+		}
+		logrus.Debugf("successfully stored item %s", reqURL)
+		cacheMetric.WithLabelValues("stored").Inc()
+	}()
 }
