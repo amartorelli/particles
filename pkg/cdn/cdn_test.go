@@ -316,7 +316,15 @@ func TestGetMaxAge(t *testing.T) {
 	}
 }
 
-func TestRevalidation(t *testing.T) {
+func TestShouldValidate(t *testing.T) {
 	// TODO: we need to fabricate an object that is found in cache but
 	// requires revalidation
+}
+
+func TestCleanHeadersMap(t *testing.T) {
+	// TODO
+}
+
+func TestValidate(t *testing.T) {
+	// TODO
 }
