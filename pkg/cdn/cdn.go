@@ -135,9 +135,10 @@ func (c *CDN) Start() <-chan struct{} {
 	}
 	http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		// the address always includes the port, so we split
-		addrParts := strings.Split(addr, ":")
-		host := addrParts[0]
-		port := addrParts[1]
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
 
 		// check we manage that endpoint
 		e, ok := c.endpoints[host]
