@@ -25,4 +25,14 @@ var (
 		Name: "particles_requests_contenttype_parser_total",
 		Help: "Status of the parser when analysing the response headers",
 	}, []string{"event"})
+
+	validationMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "particles_validations_total",
+		Help: "Number of cache validations needed",
+	})
+
+	validationErrorsMetric = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "particles_validation_errors_total",
+		Help: "Number of cache validations needed",
+	})
 )

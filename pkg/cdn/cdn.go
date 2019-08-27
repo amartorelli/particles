@@ -265,15 +265,18 @@ func cleanHeadersMap(hh map[string]string) map[string]string {
 	return hh
 }
 
-func revalidate(method, fr string, body io.Reader) (revalidated bool, resp *http.Response, err error) {
-	// TODO: implement revalidate
+// validate implements the validation by sending a request with the If-Modified-Since header
+func validate(method, fr string, body io.Reader) (validated bool, resp *http.Response, err error) {
+	// TODO: implement validate
 	return false, nil, nil
 }
 
-func shouldRevalidate(c *cache.ContentObject, d time.Duration) bool {
+// shouldValidate checks if the content has changed since we cached it
+func shouldValidate(c *cache.ContentObject, d time.Duration) bool {
 	return time.Now().Sub(time.Unix(c.CachedTimestamp(), 0).Add(d)) > 0
 }
 
+// respond sends the response back to the client
 func respond(w http.ResponseWriter, hh http.Header, body []byte) error {
 	for k, v := range hh {
 		w.Header().Set(k, v[0])
@@ -320,22 +323,21 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if found {
-		// check if the URL needs to be revalidated. Revalidate if 15m have elapsed
-		if shouldRevalidate(content, 15*time.Second) {
-			// revalidate
-			// TODO: add metrics
-			// If-Modified-Since: Fri, 25 Nov 2016 06:24:22 GM
-			revalidated, resp, err := revalidate(req.Method, fr, bytes.NewReader(reqBody))
+		// check if the URL needs to be validated. Validate if 15m have elapsed
+		if shouldValidate(content, 15*time.Second) {
+			// validate
+			validated, resp, err := validate(req.Method, fr, bytes.NewReader(reqBody))
 			if err != nil {
 				logrus.Errorf("error revalidating cached item: %s", err)
-				// TODO: add metrics
+				validationErrorsMetric.Inc()
 				w.WriteHeader(http.StatusInternalServerError)
 			}
-			if revalidated && resp != nil {
+			if validated && resp != nil {
+				validationMetric.Inc()
 				body, err := ioutil.ReadAll(resp.Body)
 				if err != nil {
-					logrus.Errorf("error reading revalidated body: %s", err)
-					// TODO: add metrics
+					logrus.Errorf("error reading validated body: %s", err)
+					validationErrorsMetric.Inc()
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 				respond(w, resp.Header, body)
