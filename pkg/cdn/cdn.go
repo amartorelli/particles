@@ -289,7 +289,6 @@ func (c *CDN) validate(req *http.Request) (validated bool, resp *http.Response, 
 	if err != nil {
 		return false, nil, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotModified {
 		return false, nil, nil
@@ -313,7 +312,6 @@ func respond(w http.ResponseWriter, hh http.Header, body []byte) error {
 		w.Header().Set(k, v[0])
 	}
 
-	w.WriteHeader(http.StatusOK)
 	w.Write(body)
 	return nil
 }
@@ -369,11 +367,13 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 			}
 
 			validated, resp, err := c.validate(tmpReq)
+			defer resp.Body.Close()
 			if err != nil {
 				logrus.Errorf("error validating cached item: %s", err)
 				validationErrorsMetric.WithLabelValues(host).Inc()
 				w.WriteHeader(http.StatusInternalServerError)
 			}
+
 			if validated && resp != nil {
 				validationMetric.WithLabelValues(host).Inc()
 				body, err := ioutil.ReadAll(resp.Body)
