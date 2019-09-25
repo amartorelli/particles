@@ -1,6 +1,7 @@
 package cdn
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -23,6 +24,10 @@ var (
 	errAPIInit   = errors.New("error initializing API")
 )
 
+const (
+	defaultIfModifiedValidation = 300
+)
+
 // CDN represents the CDN ojbect
 type CDN struct {
 	api          *api.API
@@ -33,13 +38,15 @@ type CDN struct {
 	httpsEnabled bool
 	httpMux      *http.ServeMux
 	endpoints    map[string]endpoint
+	httpClient   *http.Client
 }
 
 // endpoint is a structure to represent an endpoint handled by the Particles
 type endpoint struct {
-	IP    string
-	Port  int
-	Proto string
+	IP                   string
+	Port                 int
+	Proto                string
+	IfModifiedValidation int
 }
 
 // NewCDN returns a new CDN object
@@ -91,22 +98,48 @@ func NewCDN(conf Conf) (*CDN, error) {
 
 	// populate endpoints
 	eps := make(map[string]endpoint, 0)
+
+	var ifModVal int
 	for _, e := range conf.HTTP.Backends {
 		port := conf.HTTP.Port
 		if e.Port > 0 {
 			port = e.Port
 		}
-		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "http"}
+
+		if e.IfModifiedValidation != 0 {
+			ifModVal = e.IfModifiedValidation
+		} else {
+			ifModVal = defaultIfModifiedValidation
+		}
+
+		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "http", IfModifiedValidation: ifModVal}
 	}
 	for _, e := range conf.HTTPS.Backends {
 		port := conf.HTTPS.Port
 		if e.Port > 0 {
 			port = e.Port
 		}
-		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "https"}
+
+		if e.IfModifiedValidation != 0 {
+			ifModVal = e.IfModifiedValidation
+		} else {
+			ifModVal = defaultIfModifiedValidation
+		}
+
+		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "https", IfModifiedValidation: ifModVal}
 	}
 
-	return &CDN{api: a, cache: c, httpServer: s, httpEnabled: len(conf.HTTP.Backends) > 0, httpsServer: ss, httpsEnabled: len(conf.HTTPS.Backends) > 0, httpMux: mux, endpoints: eps}, nil
+	return &CDN{
+		api:          a,
+		cache:        c,
+		httpServer:   s,
+		httpEnabled:  len(conf.HTTP.Backends) > 0,
+		httpsServer:  ss,
+		httpsEnabled: len(conf.HTTPS.Backends) > 0,
+		httpMux:      mux,
+		endpoints:    eps,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
+	}, nil
 }
 
 // Start starts the CDN by starting the HTTP/HTTPS endpoint and API. It returns a channel which can be
@@ -122,9 +155,10 @@ func (c *CDN) Start() <-chan struct{} {
 	}
 	http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		// the address always includes the port, so we split
-		addrParts := strings.Split(addr, ":")
-		host := addrParts[0]
-		port := addrParts[1]
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
 
 		// check we manage that endpoint
 		e, ok := c.endpoints[host]
@@ -204,37 +238,54 @@ func (c *CDN) Shutdown() error {
 	return nil
 }
 
+type cacheItemInfo struct {
+	ContentType string
+	MaxAge      int
+}
+
 // isCachable checks if the Cache-Control header specifies the resource as public
-func isCachable(header string) bool {
-	ccParts := strings.Split(strings.TrimSpace(header), ",")
+func (c *CDN) isCachable(headers http.Header) (bool, cacheItemInfo) {
+	cii := cacheItemInfo{}
+	// handle Content-Type header to cache if possible
+	ct := headers.Get("Content-Type")
+	if ct == "" {
+		return false, cii
+	}
+
+	if !c.cache.IsCachableContentType(ct) {
+		logrus.Debugf("content type cannot be cached")
+		return false, cii
+	}
+	cii.ContentType = ct
+
+	cc := headers.Get("Cache-Control")
+	if cc == "" {
+		return false, cii
+	}
+
+	ccParts := strings.Split(strings.TrimSpace(cc), ",")
 	cachable := false
+
 	for _, s := range ccParts {
 		trimS := strings.TrimSpace(s)
 		if strings.ToLower(trimS) == "public" {
 			logrus.Debugf("Cache-Control: %s, it's ok to cache", trimS)
 			cachable = true
 		}
-	}
-	return cachable
-}
 
-// getMaxAge returns the value of the max-age section
-func getMaxAge(header string) int {
-	var ttl int
-	ccParts := strings.Split(strings.TrimSpace(header), ",")
-	for _, s := range ccParts {
-		trimS := strings.TrimSpace(s)
 		if strings.HasPrefix(trimS, "max-age") {
 			maParts := strings.Split(trimS, "=")
 			newTTL, err := strconv.Atoi(maParts[1])
 			if err != nil {
 				logrus.Debugf("invalid TTL: %s", err)
 			} else {
-				ttl = newTTL
+				cii.MaxAge = newTTL
 			}
 		}
 	}
-	return ttl
+
+	logrus.Debugf("content type can be cached")
+	return cachable, cii
 }
 
 // respHeadersToMap converts headers in  respons to a map of strings
@@ -252,12 +303,48 @@ func cleanHeadersMap(hh map[string]string) map[string]string {
 	return hh
 }
 
+// validate implements the validation by sending a request with the If-Modified-Since header
+func (c *CDN) validate(req *http.Request) (validated bool, resp *http.Response, err error) {
+	// execute the request to the backend
+	resp, err = c.httpClient.Do(req)
+	if err != nil {
+		return false, nil, err
+	}
+
+	if resp.StatusCode == http.StatusNotModified {
+		return false, nil, nil
+	}
+
+	return true, resp, nil
+}
+
+// shouldValidate checks if the content has changed since we cached it
+func shouldValidate(c *cache.ContentObject, d time.Duration) bool {
+	// always validate if the cached timestamp isn't specified for any reason
+	if c.CachedTimestamp() == 0 {
+		return true
+	}
+
+	return time.Now().Sub(time.Unix(c.CachedTimestamp(), 0).Add(d)) > 0
+}
+
+// respond sends the response back to the client
+func respond(w http.ResponseWriter, hh http.Header, body []byte) error {
+	for k, v := range hh {
+		w.Header().Set(k, v[0])
+	}
+
+	w.Write(body)
+	return nil
+}
+
 // httpHandler is the main handler for the CDN
 func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
-	defer requestDuration.Observe(time.Since(start).Seconds())
 
 	host := req.Host
+	defer requestDuration.WithLabelValues(host).Observe(time.Since(start).Seconds())
+
 	h, _, err := net.SplitHostPort(req.Host)
 	if err == nil {
 		host = h
@@ -273,27 +360,74 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	content, found, err := c.cache.Lookup(reqURL)
 	if err != nil {
 		logrus.Debugf("error while looking up %s: %s", fr, err)
-		cacheMetric.WithLabelValues("lookup_error").Inc()
+		cacheMetric.WithLabelValues(host, "lookup_error").Inc()
 	}
-	if found {
-		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
-		cacheMetric.WithLabelValues("hit").Inc()
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusOK), "success").Inc()
-		for k, v := range content.Headers() {
-			w.Header().Set(k, string(v))
+
+	var reqBody []byte
+	if req.Body != nil {
+		reqBody, err = ioutil.ReadAll(req.Body)
+		if err != nil {
+			logrus.Errorf("error reading request body: %s", err)
+			requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusBadRequest), "error").Inc()
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
-		w.WriteHeader(http.StatusOK)
-		w.Write(content.Content())
+	}
+
+	if found {
+		// check if the URL needs to be validated. Validate if 15m have elapsed
+		if shouldValidate(content, time.Duration(c.endpoints[host].IfModifiedValidation)*time.Second) {
+			// validate
+			tmpReq, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
+			if err != nil {
+				logrus.Errorf("error creating validation request: %s", err)
+				validationErrorsMetric.WithLabelValues(host).Inc()
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			for k, v := range req.Header {
+				req.Header.Set(k, strings.Join(v, " "))
+			}
+
+			validated, resp, err := c.validate(tmpReq)
+			defer resp.Body.Close()
+			if err != nil {
+				logrus.Errorf("error validating cached item: %s", err)
+				validationErrorsMetric.WithLabelValues(host).Inc()
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+
+			if validated && resp != nil {
+				validationMetric.WithLabelValues(host).Inc()
+				body, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					logrus.Errorf("error reading validated body: %s", err)
+					validationErrorsMetric.WithLabelValues(host).Inc()
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+				respond(w, resp.Header, body)
+			}
+			return
+		}
+
+		logrus.Infof("cache hit: %s (%s)", fr, content.ContentType)
+		cacheMetric.WithLabelValues(host, "hit").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusOK), "success").Inc()
+
+		hh := http.Header{}
+		for k, v := range content.Headers() {
+			hh[k] = []string{v}
+		}
+
+		respond(w, hh, content.Content())
 		return
 	}
 
-	logrus.Debugf("cache miss: %s", fr)
-	// creating a client to send the full request
-	client := &http.Client{}
-	r, err := http.NewRequest(req.Method, fr, req.Body)
+	// cache miss, fetch content again
+	logrus.Infof("cache miss: %s", fr)
+	r, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
 	if err != nil {
 		logrus.Errorf("error creating a new proxy request: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusBadRequest), "error").Inc()
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -305,10 +439,10 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// execute the request to the backend
-	resp, err := client.Do(r)
+	resp, err := c.httpClient.Do(r)
 	if err != nil {
 		logrus.Errorf("error proxying request: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusBadRequest), "error").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusBadRequest), "error").Inc()
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -318,51 +452,40 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	rb, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		logrus.Errorf("error reading response body: %s", err)
-		requestsMetric.WithLabelValues(strconv.Itoa(http.StatusInternalServerError), "error").Inc()
+		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusInternalServerError), "error").Inc()
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	// handle Content-Type header to cache if possible
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		logrus.Debugf("[%s] Content-type: %s", fr, ct)
-		ccParserMetric.WithLabelValues("content_type_present").Inc()
-		if c.cache.IsCachableContentType(ct) {
-			logrus.Debugf("content type can be cached")
-			ccParserMetric.WithLabelValues("content_type_cachable").Inc()
+	requestsMetric.WithLabelValues(host, strconv.Itoa(resp.StatusCode), "success").Inc()
 
-			cc := resp.Header.Get("Cache-Control")
-			if cc != "" && isCachable(cc) {
-				logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
-				ccParserMetric.WithLabelValues("cache_control_cachable").Inc()
+	// respond to client as soon as possible
+	respond(w, resp.Header, rb)
 
-				ttl := getMaxAge(cc)
-				// we also want to store the headers
-				h := cleanHeadersMap(respHeadersToMap(resp))
-				co := cache.NewContentObject(rb, ct, h, ttl)
-				// avoid delaying the response to the user because
-				// the object is being stored, hence use a go routine
-				// Prefer serving the user as fast as possible rather than checking if
-				// there was an error storing the object. It will be picked up via metrics/logs.
-				go func() {
-					err := c.cache.Store(reqURL, co)
-					if err != nil {
-						logrus.Errorf("error storing cache item %s: %s", reqURL, err)
-						cacheMetric.WithLabelValues("store_error").Inc()
-					}
-					logrus.Debugf("successfully stored item %s", reqURL)
-					cacheMetric.WithLabelValues("stored").Inc()
-				}()
-			}
+	cachable, cii := c.isCachable(resp.Header)
+	if !cachable {
+		return
+	}
+
+	logrus.Debugf("[%s] Content-type: %s", fr, cii.ContentType)
+	ccParserMetric.WithLabelValues(host, "content_type_present").Inc()
+	ccParserMetric.WithLabelValues(host, "content_type_cachable").Inc()
+	ccParserMetric.WithLabelValues(host, "cache_control_cachable").Inc()
+	logrus.Infof("storing a new object in cache: %s (%s)", fr, cii.ContentType)
+
+	// we also want to store the headers
+	hh := cleanHeadersMap(respHeadersToMap(resp))
+	co := cache.NewContentObject(rb, cii.ContentType, hh, cii.MaxAge, time.Now().Unix())
+	// avoid keeping the handler busy while storing the object in cache
+	// Prefer freeing up the handler as fast as possible rather than checking if
+	// there was an error storing the object. It will be picked up via metrics/logs.
+	go func() {
+		err := c.cache.Store(reqURL, co)
+		if err != nil {
+			logrus.Errorf("error storing cache item %s: %s", reqURL, err)
+			cacheMetric.WithLabelValues(host, "store_error").Inc()
 		}
-	}
-
-	// forward response headers
-	for k, v := range resp.Header {
-		w.Header().Set(k, v[0])
-	}
-
-	requestsMetric.WithLabelValues(strconv.Itoa(resp.StatusCode), "success").Inc()
-	w.WriteHeader(resp.StatusCode)
-	w.Write(rb)
+		logrus.Debugf("successfully stored item %s", reqURL)
+		cacheMetric.WithLabelValues(host, "stored").Inc()
+	}()
 }

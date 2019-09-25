@@ -10,7 +10,7 @@ const (
 	// defaultTTL is the default TTL for an cache entry
 	defaultTTL = 86400 // 1 day default TTL
 	// defaultContentTypeRegex is the regular expression to check if the content type should be cached
-	defaultContentTypeRegex = "(^(image|audio|video)/.+$|^.+/javascript.*$|^text/css$)"
+	defaultContentTypeRegex = "^(image|audio|video)/.+$|^.+/javascript.*$|^text/css$"
 )
 
 var (
@@ -39,10 +39,11 @@ type Cache interface {
 
 // ContentObject represents a cached object
 type ContentObject struct {
-	content     []byte
-	headers     map[string]string
-	ContentType string
-	ttl         int
+	content         []byte
+	headers         map[string]string
+	ContentType     string
+	ttl             int
+	cachedTimestamp int64
 }
 
 // IsValid checks the cache configuration is valid
@@ -76,8 +77,8 @@ func NewCache(conf Conf) (Cache, error) {
 }
 
 // NewContentObject returns a new cache entry
-func NewContentObject(data []byte, contentType string, headers map[string]string, ttl int) *ContentObject {
-	return &ContentObject{content: data, ContentType: contentType, headers: headers, ttl: ttl}
+func NewContentObject(data []byte, contentType string, headers map[string]string, ttl int, cachedTimestamp int64) *ContentObject {
+	return &ContentObject{content: data, ContentType: contentType, headers: headers, ttl: ttl, cachedTimestamp: cachedTimestamp}
 }
 
 // Content exposes the content bytes
@@ -93,6 +94,11 @@ func (co *ContentObject) TTL() int {
 // Headers returns the headers
 func (co *ContentObject) Headers() map[string]string {
 	return co.headers
+}
+
+// CachedTimestamp returns the timestamp of the time the object was cached
+func (co *ContentObject) CachedTimestamp() int64 {
+	return co.cachedTimestamp
 }
 
 // contentTypeRegex compiles a regex to be used to check cachable Content-Type

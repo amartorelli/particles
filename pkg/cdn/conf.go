@@ -24,12 +24,13 @@ type HTTPConf struct {
 
 // BackendConf is the configuration for a website we cache for
 type BackendConf struct {
-	Name     string `yaml:"name"`
-	Domain   string `yaml:"domain"`
-	IP       string `yaml:"ip"`
-	Port     int    `yaml:"port"`
-	CertFile string `yaml:"cert"`
-	KeyFile  string `yaml:"key"`
+	Name                 string `yaml:"name"`
+	Domain               string `yaml:"domain"`
+	IP                   string `yaml:"ip"`
+	Port                 int    `yaml:"port"`
+	IfModifiedValidation int    `yaml:"ifmodified_validation"`
+	CertFile             string `yaml:"cert"`
+	KeyFile              string `yaml:"key"`
 }
 
 // DefaultHTTPConf returns a HTTP configuration with some defaults

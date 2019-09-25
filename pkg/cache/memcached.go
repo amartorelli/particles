@@ -27,9 +27,10 @@ type MemcachedCache struct {
 
 // MemcachedItem is the structure used to serialize data into memcache
 type MemcachedItem struct {
-	Content     []byte
-	Headers     map[string]string
-	ContentType string
+	Content         []byte
+	Headers         map[string]string
+	ContentType     string
+	CachedTimestamp int64
 }
 
 // NewMemcachedCache initialises a new cache
@@ -94,7 +95,7 @@ func (c *MemcachedCache) Lookup(key string) (*ContentObject, bool, error) {
 	}
 	lookupMetric.WithLabelValues("memcached", "success").Inc()
 
-	return NewContentObject([]byte(mi.Content), string(mi.ContentType), mi.Headers, int(i.Expiration)), true, nil
+	return NewContentObject([]byte(mi.Content), string(mi.ContentType), mi.Headers, int(i.Expiration), int64(mi.CachedTimestamp)), true, nil
 }
 
 // Store inserts a new entry into the cache
@@ -103,7 +104,7 @@ func (c *MemcachedCache) Store(key string, co *ContentObject) error {
 	defer storeDuration.WithLabelValues("memcached").Observe(time.Since(start).Seconds())
 
 	var buf bytes.Buffer
-	mi := &MemcachedItem{Content: co.Content(), Headers: co.Headers(), ContentType: co.ContentType}
+	mi := &MemcachedItem{Content: co.Content(), Headers: co.Headers(), ContentType: co.ContentType, CachedTimestamp: time.Now().Unix()}
 	enc := gob.NewEncoder(&buf)
 	err := enc.Encode(mi)
 	if err != nil {

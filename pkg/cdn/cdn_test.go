@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +122,7 @@ func TestHTTPHandler(t *testing.T) {
 		"text/css",
 		make(map[string]string),
 		10,
+		time.Now().Unix(),
 	)
 	cdn.cache.Store("http://www.example.com/style.css", co)
 
@@ -134,9 +134,10 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		// the address always includes the port, so we split
-		addrParts := strings.Split(addr, ":")
-		host := addrParts[0]
-		port := addrParts[1]
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
 
 		// check we manage that endpoint
 		e, ok := cdn.endpoints[host]
@@ -279,38 +280,50 @@ func TestHTTPHandler(t *testing.T) {
 
 func TestIsCachable(t *testing.T) {
 	tt := []struct {
-		header   string
+		headers  http.Header
 		cachable bool
 		errMsg   string
 	}{
-		{"public", true, "public Cache-Control header should be cachable"},
-		{"public, max-age=3600", true, "public Cache-Control header with max-age should be cachable"},
-		{"private", false, "private Cache-Control header should not be cachable"},
-		{"no-store", false, "no-store Cache-Control header should not be cachable"},
-		{"no-cache", false, "no-cache Cache-Control header should not be cachable"},
+		{http.Header{"Cache-Control": []string{"public"}, "Content-Type": []string{"text/css"}}, true, "public Cache-Control header should be cachable"},
+		{http.Header{"Cache-Control": []string{"public"}, "Content-Type": []string{"application/json"}}, false, "public Cache-Control header should not be cachable if the Content-type isn't matching the regexp"},
+		{http.Header{"Cache-Control": []string{"public", "max-age=3600"}, "Content-Type": []string{"text/css"}}, true, "public Cache-Control header with max-age should be cachable"},
+		{http.Header{"Cache-Control": []string{"private"}, "Content-Type": []string{"text/css"}}, false, "private Cache-Control header should not be cachable"},
+		{http.Header{"Cache-Control": []string{"no-store"}, "Content-Type": []string{"text/css"}}, false, "no-store Cache-Control header should not be cachable"},
+		{http.Header{"Cache-Control": []string{"no-cache"}, "Content-Type": []string{"text/css"}}, false, "no-cache Cache-Control header should not be cachable"},
+		{http.Header{"Cache-Control": []string{"public"}}, false, "public Cache-Control header should not be cachable if Content-type is not present"},
 	}
 
+	c, _ := NewCDN(DefaultConf())
 	for _, tc := range tt {
-		if isCachable(tc.header) != tc.cachable {
+		cachable, _ := c.isCachable(tc.headers)
+		if cachable != tc.cachable {
 			t.Error(tc.errMsg)
 		}
 	}
 }
 
-func TestGetMaxAge(t *testing.T) {
+func TestShouldValidate(t *testing.T) {
 	tt := []struct {
-		header string
-		expTTL int
-		errMsg string
+		c              *cache.ContentObject
+		d              time.Duration
+		shouldValidate bool
 	}{
-		{"public", 0, "expected max-age 0 because unspecified"},
-		{"public, max-age=3600", 3600, "public Cache-Control header with max-age=3600 should return 3600"},
-		{"private, max-age=3600", 3600, "private Cache-Control header with max-age=3600 should return 3600"},
+		{cache.NewContentObject(nil, "", make(map[string]string, 0), 0, 0), 5 * time.Minute, true},
+		{cache.NewContentObject(nil, "", make(map[string]string, 0), 0, time.Now().Add(-10*time.Minute).Unix()), 15 * time.Minute, false},
+		{cache.NewContentObject(nil, "", make(map[string]string, 0), 0, time.Now().Add(-20*time.Minute).Unix()), 15 * time.Minute, true},
 	}
 
 	for _, tc := range tt {
-		if getMaxAge(tc.header) != tc.expTTL {
-			t.Error(tc.errMsg)
+		if shouldValidate(tc.c, tc.d) != tc.shouldValidate {
+			t.Errorf("shouldValidate for object with cachedTimestamp %v and delta %v should return %v", tc.c.CachedTimestamp(), tc.d, tc.shouldValidate)
 		}
 	}
+}
+
+func TestCleanHeadersMap(t *testing.T) {
+	// TODO
+}
+
+func TestValidate(t *testing.T) {
+	// TODO
 }
