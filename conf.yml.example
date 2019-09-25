@@ -5,7 +5,6 @@ cache:
   type: "memory"
   options:
     memory_limit: 10240
-    ttl: 86400
 http:
   port: 80
   backends:

@@ -40,7 +40,7 @@ type MemoryCache struct {
 
 // MemoryCacheConfig is how the configuration for the memory cache is represented in the config file
 type MemoryCacheConfig struct {
-	MemoryLimit int      `yaml:"memory_limit"` // mandatory, how much memory in bytes to use
+	MemoryLimit int      `yaml:"memory_limit"` // optional, how much memory in bytes to use
 	TTL         int      `yaml:"ttl"`          // optional, how long each entry is cached for
 	Patterns    []string `yaml:"patterns"`     // optional, content-type patterns
 	ForcePurge  bool     `yaml:"force_purge"`  // optional, delete random items if memory can't be freed up
