@@ -34,6 +34,11 @@ func main() {
 		logrus.SetLevel(logrus.InfoLevel)
 	}
 
+	formatter := &logrus.TextFormatter{
+		FullTimestamp: true,
+	}
+	logrus.SetFormatter(formatter)
+
 	conf, err := ioutil.ReadFile(*confFile)
 	if err != nil {
 		logrus.Fatal(err)

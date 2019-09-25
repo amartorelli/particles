@@ -24,6 +24,10 @@ var (
 	errAPIInit   = errors.New("error initializing API")
 )
 
+const (
+	defaultIfModifiedValidation = 300
+)
+
 // CDN represents the CDN ojbect
 type CDN struct {
 	api          *api.API
@@ -39,9 +43,10 @@ type CDN struct {
 
 // endpoint is a structure to represent an endpoint handled by the Particles
 type endpoint struct {
-	IP    string
-	Port  int
-	Proto string
+	IP                   string
+	Port                 int
+	Proto                string
+	IfModifiedValidation int
 }
 
 // NewCDN returns a new CDN object
@@ -93,19 +98,35 @@ func NewCDN(conf Conf) (*CDN, error) {
 
 	// populate endpoints
 	eps := make(map[string]endpoint, 0)
+
+	var ifModVal int
 	for _, e := range conf.HTTP.Backends {
 		port := conf.HTTP.Port
 		if e.Port > 0 {
 			port = e.Port
 		}
-		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "http"}
+
+		if e.IfModifiedValidation != 0 {
+			ifModVal = e.IfModifiedValidation
+		} else {
+			ifModVal = defaultIfModifiedValidation
+		}
+
+		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "http", IfModifiedValidation: ifModVal}
 	}
 	for _, e := range conf.HTTPS.Backends {
 		port := conf.HTTPS.Port
 		if e.Port > 0 {
 			port = e.Port
 		}
-		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "https"}
+
+		if e.IfModifiedValidation != 0 {
+			ifModVal = e.IfModifiedValidation
+		} else {
+			ifModVal = defaultIfModifiedValidation
+		}
+
+		eps[e.Domain] = endpoint{IP: e.IP, Port: port, Proto: "https", IfModifiedValidation: ifModVal}
 	}
 
 	return &CDN{
@@ -299,6 +320,7 @@ func (c *CDN) validate(req *http.Request) (validated bool, resp *http.Response, 
 
 // shouldValidate checks if the content has changed since we cached it
 func shouldValidate(c *cache.ContentObject, d time.Duration) bool {
+	// always validate if the cached timestamp isn't specified for any reason
 	if c.CachedTimestamp() == 0 {
 		return true
 	}
@@ -354,7 +376,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 
 	if found {
 		// check if the URL needs to be validated. Validate if 15m have elapsed
-		if shouldValidate(content, 15*time.Second) {
+		if shouldValidate(content, time.Duration(c.endpoints[host].IfModifiedValidation)*time.Second) {
 			// validate
 			tmpReq, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
 			if err != nil {
@@ -387,7 +409,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		logrus.Debugf("cache hit: %s (%s)", fr, content.ContentType)
+		logrus.Infof("cache hit: %s (%s)", fr, content.ContentType)
 		cacheMetric.WithLabelValues(host, "hit").Inc()
 		requestsMetric.WithLabelValues(host, strconv.Itoa(http.StatusOK), "success").Inc()
 
@@ -401,7 +423,7 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// cache miss, fetch content again
-	logrus.Debugf("cache miss: %s", fr)
+	logrus.Infof("cache miss: %s", fr)
 	r, err := http.NewRequest(req.Method, fr, bytes.NewReader(reqBody))
 	if err != nil {
 		logrus.Errorf("error creating a new proxy request: %s", err)
