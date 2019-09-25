@@ -10,7 +10,7 @@ const (
 	// defaultTTL is the default TTL for an cache entry
 	defaultTTL = 86400 // 1 day default TTL
 	// defaultContentTypeRegex is the regular expression to check if the content type should be cached
-	defaultContentTypeRegex = "(^(image|audio|video)/.+$|^.+/javascript.*$|^text/css$)"
+	defaultContentTypeRegex = "^(image|audio|video)/.+$|^.+/javascript.*$|^text/css$"
 )
 
 var (

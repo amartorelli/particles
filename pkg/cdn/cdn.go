@@ -217,37 +217,54 @@ func (c *CDN) Shutdown() error {
 	return nil
 }
 
+type cacheItemInfo struct {
+	ContentType string
+	MaxAge      int
+}
+
 // isCachable checks if the Cache-Control header specifies the resource as public
-func isCachable(header string) bool {
-	ccParts := strings.Split(strings.TrimSpace(header), ",")
+func (c *CDN) isCachable(headers http.Header) (bool, cacheItemInfo) {
+	cii := cacheItemInfo{}
+	// handle Content-Type header to cache if possible
+	ct := headers.Get("Content-Type")
+	if ct == "" {
+		return false, cii
+	}
+
+	if !c.cache.IsCachableContentType(ct) {
+		logrus.Debugf("content type cannot be cached")
+		return false, cii
+	}
+	cii.ContentType = ct
+
+	cc := headers.Get("Cache-Control")
+	if cc == "" {
+		return false, cii
+	}
+
+	ccParts := strings.Split(strings.TrimSpace(cc), ",")
 	cachable := false
+
 	for _, s := range ccParts {
 		trimS := strings.TrimSpace(s)
 		if strings.ToLower(trimS) == "public" {
 			logrus.Debugf("Cache-Control: %s, it's ok to cache", trimS)
 			cachable = true
 		}
-	}
-	return cachable
-}
 
-// getMaxAge returns the value of the max-age section
-func getMaxAge(header string) int {
-	var ttl int
-	ccParts := strings.Split(strings.TrimSpace(header), ",")
-	for _, s := range ccParts {
-		trimS := strings.TrimSpace(s)
 		if strings.HasPrefix(trimS, "max-age") {
 			maParts := strings.Split(trimS, "=")
 			newTTL, err := strconv.Atoi(maParts[1])
 			if err != nil {
 				logrus.Debugf("invalid TTL: %s", err)
 			} else {
-				ttl = newTTL
+				cii.MaxAge = newTTL
 			}
 		}
 	}
-	return ttl
+
+	logrus.Debugf("content type can be cached")
+	return cachable, cii
 }
 
 // respHeadersToMap converts headers in  respons to a map of strings
@@ -423,35 +440,20 @@ func (c *CDN) httpHandler(w http.ResponseWriter, req *http.Request) {
 	// respond to client as soon as possible
 	respond(w, resp.Header, rb)
 
-	// handle Content-Type header to cache if possible
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
+	cachable, cii := c.isCachable(resp.Header)
+	if !cachable {
 		return
 	}
 
-	logrus.Debugf("[%s] Content-type: %s", fr, ct)
+	logrus.Debugf("[%s] Content-type: %s", fr, cii.ContentType)
 	ccParserMetric.WithLabelValues(host, "content_type_present").Inc()
-	if !c.cache.IsCachableContentType(ct) {
-		logrus.Debugf("content type cannot be cached")
-		return
-	}
-
-	logrus.Debugf("content type can be cached")
 	ccParserMetric.WithLabelValues(host, "content_type_cachable").Inc()
-
-	cc := resp.Header.Get("Cache-Control")
-	if cc == "" || !isCachable(cc) {
-		logrus.Info("empty cache control header or non cachablecontent")
-		return
-	}
-
-	logrus.Infof("storing a new object in cache: %s (%s)", fr, ct)
 	ccParserMetric.WithLabelValues(host, "cache_control_cachable").Inc()
+	logrus.Infof("storing a new object in cache: %s (%s)", fr, cii.ContentType)
 
-	ttl := getMaxAge(cc)
 	// we also want to store the headers
 	hh := cleanHeadersMap(respHeadersToMap(resp))
-	co := cache.NewContentObject(rb, ct, hh, ttl, time.Now().Unix())
+	co := cache.NewContentObject(rb, cii.ContentType, hh, cii.MaxAge, time.Now().Unix())
 	// avoid keeping the handler busy while storing the object in cache
 	// Prefer freeing up the handler as fast as possible rather than checking if
 	// there was an error storing the object. It will be picked up via metrics/logs.
